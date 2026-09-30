@@ -12,6 +12,7 @@ LT や勉強会の発表に、リアルタイムで質問やコメントを送�
 
 ```sh
 pnpm install
+pnpm db:migrate   # ローカル D1 にテーブルを作る
 pnpm dev
 ```
 

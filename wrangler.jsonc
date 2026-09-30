@@ -1,0 +1,26 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "leaction",
+  "main": "src/worker/index.ts",
+  "compatibility_date": "2026-08-15", // vitest-pool-workers 同梱の workerd が対応する日付までにする
+  "observability": { "enabled": true },
+  // 静的アセット（SPA）は @cloudflare/vite-plugin がビルド結果を配信する。
+  // /api/* は常に Worker で処理し、それ以外で見つからないパスは index.html を返す。
+  "assets": {
+    "not_found_handling": "single-page-application",
+    "run_worker_first": ["/api/*"]
+  },
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "leaction",
+      // 本番の ID は `wrangler d1 create leaction` の結果に置き換える
+      "database_id": "00000000-0000-0000-0000-000000000000",
+      "migrations_dir": "migrations"
+    }
+  ],
+  "durable_objects": {
+    "bindings": [{ "name": "EVENT_ROOM", "class_name": "EventRoom" }]
+  },
+  "migrations": [{ "tag": "v1", "new_sqlite_classes": ["EventRoom"] }]
+}
