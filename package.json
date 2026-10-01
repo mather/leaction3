@@ -1,0 +1,35 @@
+{
+  "name": "leaction",
+  "private": true,
+  "version": "0.0.0",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "preview": "vite preview",
+    "test": "vitest run",
+    "typecheck": "wrangler types --check && tsc -b",
+    "lint": "biome check .",
+    "format": "biome check --write .",
+    "deploy": "vite build && wrangler deploy",
+    "db:migrate": "wrangler d1 migrations apply leaction --local",
+    "db:migrate:remote": "wrangler d1 migrations apply leaction --remote",
+    "cf-typegen": "wrangler types"
+  },
+  "dependencies": {
+    "hono": "^4.13.12",
+    "solid-js": "^1.9.15",
+    "valibot": "^1.5.0"
+  },
+  "devDependencies": {
+    "@biomejs/biome": "^2.5.15",
+    "@cloudflare/vite-plugin": "^1.62.3",
+    "@cloudflare/vitest-pool-workers": "^0.22.0",
+    "@types/node": "^26.6.3",
+    "typescript": "^7.0.2",
+    "vite": "^8.3.1",
+    "vite-plugin-solid": "^2.11.14",
+    "vitest": "^4.1.11",
+    "wrangler": "^4.145.0"
+  }
+}

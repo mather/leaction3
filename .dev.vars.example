@@ -1,0 +1,4 @@
+# ローカルで上限値を変えるときは .dev.vars にコピーして編集する（src/shared/schema.ts の LIMIT_ENV_KEYS）
+# LIMIT_RATE_COUNT=20
+# LIMIT_RATE_WINDOW_SEC=10
+# LIMIT_COMMENT_MAX_LENGTH=500

@@ -1,0 +1,42 @@
+/* デザイントークン（docs/ui.md「デザイントークン」）。ダークモードは後からここに追加する。 */
+:root {
+  --bg: #f4f2ec;
+  --surface: #ffffff;
+  --surface-sub: #f9f8f4;
+  --line: #e2ded4;
+  --line-strong: #cfcabd;
+  --text: #1b1f24;
+  --text-sub: #5b616b;
+  --accent: #0b6e66;
+  --accent-soft: #ddefec;
+  --like: #c2410c;
+  --warn: #9a3412;
+  --warn-soft: #fff6ec;
+
+  --font-body: "Zen Kaku Gothic New", system-ui, sans-serif;
+  --font-logo: "M PLUS Rounded 1c", var(--font-body);
+
+  --radius-card: 14px;
+  --radius-control: 12px;
+  --radius-sheet: 22px;
+  --tap-min: 44px;
+}
+
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+html {
+  -webkit-text-size-adjust: 100%;
+}
+
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--text);
+  font-family: var(--font-body);
+  font-weight: 400;
+  line-height: 1.6;
+}

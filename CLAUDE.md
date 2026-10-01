@@ -16,8 +16,11 @@ LeacTion! を Cloudflare 上に再実装するプロジェクト。LT・勉強�
 - フロントエンド: SolidJS + TypeScript（UI ライブラリは使わない。SUID は不採用）
 - ビルド: Vite + `@cloudflare/vite-plugin`、デプロイは Wrangler
 - パッケージ管理: pnpm
-- テスト: Vitest（Worker / DO は `@cloudflare/vitest-pool-workers`）
-- 候補（未確定・採用時にこの行を更新）: ルーティングに Hono、入力検証に Valibot、スタイルは CSS Modules / vanilla-extract / Tailwind のいずれか
+- テスト: Vitest（Worker / DO は `@cloudflare/vitest-pool-workers`、`test/` に置く）
+- ルーティング: Hono（Worker の `/api/*`）
+- 入力検証: Valibot（スキーマは `src/shared/schema.ts`）
+- スタイル: CSS Modules（`*.module.css`）。デザイントークンは `src/client/styles/global.css` の CSS 変数
+- Lint / Format: Biome
 
 ## ディレクトリ構成（予定）
 
@@ -33,21 +36,26 @@ src/
     auth.ts          Cookie 署名、トークンのハッシュ化・照合
     turnstile.ts
   shared/
+    api.ts           HTTP API の型（クライアント・サーバー共用）
     protocol.ts      WebSocket メッセージ型（クライアント・サーバー共用）
     schema.ts        入力検証スキーマ、上限値
+test/                Vitest（Workers ランタイム上で実行）
 migrations/          D1 マイグレーション
 wrangler.jsonc
+worker-configuration.d.ts   `pnpm cf-typegen` で生成（wrangler.jsonc を変えたら再生成）
 ```
 
-## コマンド（予定）
+## コマンド
 
 ```sh
-pnpm dev          # Vite + Workers ランタイムでローカル起動（DO・D1 もローカル）
-pnpm test         # Vitest
-pnpm typecheck
-pnpm lint
-pnpm deploy       # wrangler deploy
-pnpm db:migrate   # wrangler d1 migrations apply
+pnpm dev                # Vite + Workers ランタイムでローカル起動（DO・D1 もローカル）
+pnpm test               # Vitest
+pnpm typecheck          # wrangler types --check と tsc -b
+pnpm lint               # Biome（修正は pnpm format）
+pnpm deploy             # vite build して wrangler deploy
+pnpm db:migrate         # ローカル D1 にマイグレーションを適用
+pnpm db:migrate:remote  # 本番 D1 に適用
+pnpm cf-typegen         # worker-configuration.d.ts を再生成
 ```
 
 ## 守るべき設計ルール
