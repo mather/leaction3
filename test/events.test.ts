@@ -1,6 +1,6 @@
 import { runInDurableObject } from "cloudflare:test";
 import { env, exports } from "cloudflare:workers";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import type { CreateEventResponse } from "../src/shared/api";
 import { hashToken } from "../src/worker/auth";
 import { verifyTurnstile } from "../src/worker/turnstile";
@@ -118,6 +118,21 @@ describe("EventRoom.initialize", () => {
     expect(rows).toEqual([]);
   });
 
+  it("SQLite への書き込みに失敗したら D1 の索引も消す", async () => {
+    const stub = env.EVENT_ROOM.getByName("broken01");
+    // talks.speaker の NOT NULL 制約に違反させる
+    const broken = { ...params.event, talks: [{ speaker: null as unknown as string, title: "b" }] };
+    await expect(
+      stub.initialize({ id: "broken01", event: broken, ownerTokenHash: params.ownerTokenHash }),
+    ).rejects.toThrow();
+    const indexed = await env.DB.prepare("SELECT 1 FROM events WHERE id = 'broken01'").first();
+    expect(indexed).toBeNull();
+    const rows = await runInDurableObject(stub, (_, state) =>
+      state.storage.sql.exec("SELECT 1 FROM event").toArray(),
+    );
+    expect(rows).toEqual([]);
+  });
+
   it("初期化済みなら id_taken", async () => {
     const stub = env.EVENT_ROOM.getByName("twice001");
     expect(await stub.initialize({ id: "twice001", ...params })).toEqual({ ok: true });
@@ -131,6 +146,17 @@ describe("EventRoom.initialize", () => {
 describe("verifyTurnstile", () => {
   it("秘密鍵が未設定なら検証を省略する", async () => {
     expect(await verifyTurnstile({}, undefined, undefined)).toBe(true);
+  });
+
+  it("Siteverify に届かなければ拒否する", async () => {
+    const spy = vi.spyOn(globalThis, "fetch").mockRejectedValue(new TypeError("network error"));
+    try {
+      expect(await verifyTurnstile({ TURNSTILE_SECRET_KEY: "secret" }, "token", undefined)).toBe(
+        false,
+      );
+    } finally {
+      spy.mockRestore();
+    }
   });
 
   it("秘密鍵があるのにトークンがなければ拒否する", async () => {

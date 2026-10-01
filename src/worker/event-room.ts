@@ -95,32 +95,38 @@ export class EventRoom extends DurableObject<Env> {
       .run();
     if (inserted.meta.changes === 0) return { ok: false, reason: "id_taken" };
 
-    this.ctx.storage.transactionSync(() => {
-      sql.exec(
-        "INSERT INTO event (singleton, id, name, date, url, hashtag, created_at) VALUES (1, ?, ?, ?, ?, ?, ?)",
-        id,
-        event.name,
-        event.date,
-        event.url,
-        event.hashtag,
-        now,
-      );
-      event.talks.forEach((talk, i) => {
+    // SQLite への書き込みはロールバックされるが、D1 の索引は残るので消してから投げ直す
+    try {
+      this.ctx.storage.transactionSync(() => {
         sql.exec(
-          "INSERT INTO talks (id, position, speaker, title) VALUES (?, ?, ?, ?)",
+          "INSERT INTO event (singleton, id, name, date, url, hashtag, created_at) VALUES (1, ?, ?, ?, ?, ?, ?)",
+          id,
+          event.name,
+          event.date,
+          event.url,
+          event.hashtag,
+          now,
+        );
+        event.talks.forEach((talk, i) => {
+          sql.exec(
+            "INSERT INTO talks (id, position, speaker, title) VALUES (?, ?, ?, ?)",
+            randomId(),
+            i,
+            talk.speaker,
+            talk.title,
+          );
+        });
+        sql.exec(
+          "INSERT INTO admin_keys (id, role, token_hash, created_at) VALUES (?, 'owner', ?, ?)",
           randomId(),
-          i,
-          talk.speaker,
-          talk.title,
+          ownerTokenHash,
+          now,
         );
       });
-      sql.exec(
-        "INSERT INTO admin_keys (id, role, token_hash, created_at) VALUES (?, 'owner', ?, ?)",
-        randomId(),
-        ownerTokenHash,
-        now,
-      );
-    });
+    } catch (err) {
+      await this.env.DB.prepare("DELETE FROM events WHERE id = ?").bind(id).run();
+      throw err;
+    }
     return { ok: true };
   }
 }
