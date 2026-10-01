@@ -17,6 +17,10 @@
   color: var(--text-sub);
 }
 
+.cta {
+  margin-bottom: 24px;
+}
+
 .card {
   padding: 16px;
   background: var(--surface);

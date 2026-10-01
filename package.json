@@ -17,6 +17,7 @@
     "cf-typegen": "wrangler types"
   },
   "dependencies": {
+    "@solidjs/router": "^1.0.0",
     "hono": "^4.13.12",
     "solid-js": "^1.9.15",
     "valibot": "^1.5.0"
