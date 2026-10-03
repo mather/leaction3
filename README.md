@@ -12,9 +12,12 @@ LT や勉強会の発表に、リアルタイムで質問やコメントを送�
 
 ```sh
 pnpm install
+cp .dev.vars.example .dev.vars   # COOKIE_SECRET を設定する
 pnpm db:migrate   # ローカル D1 にテーブルを作る
 pnpm dev
 ```
+
+Turnstile をローカルで試すときは、`.dev.vars` の `TURNSTILE_SECRET_KEY` と `.env.local`（`.env.example` を参照）の `VITE_TURNSTILE_SITE_KEY` を設定します。どちらも未設定なら Turnstile は省略されます。
 
 仕様は [`docs/`](docs/) を参照してください。
 

@@ -5,3 +5,4 @@ dist/
 !.dev.vars.example
 *.tsbuildinfo
 .DS_Store
+.env.local

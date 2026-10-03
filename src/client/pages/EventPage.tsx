@@ -6,7 +6,7 @@ import button from "../components/button.module.css";
 import { Icon } from "../components/Icon";
 import { Sheet } from "../components/Sheet";
 import { UrlField } from "../components/UrlField";
-import { ApiError, getEvent } from "../lib/api";
+import { ApiError, ensureSession, getEvent } from "../lib/api";
 import { loadLastViewedTalk, saveLastViewedTalk } from "../lib/last-talk";
 import { commentPlaceholder, pickInitialTalk, talkLabel } from "../lib/talks";
 import { eventUrl } from "../lib/urls";
@@ -75,7 +75,10 @@ function EventView(props: { data: GetEventResponse }) {
     if (next) setTalkId(next.id);
   };
 
-  // コメントの送信は WebSocket（MVP ステップ 5）で行う
+  // 開いたときに参加者 Cookie を用意する（必要なときだけ Turnstile を 1 回通す）
+  const [session, { refetch: retrySession }] = createResource(ensureSession);
+
+  // コメントの送信は WebSocket（MVP ステップ 5）で行う。接続には参加者 Cookie が要る
   const connected = () => false;
   const [draft, setDraft] = createSignal("");
   const placeholder = () => {
@@ -155,6 +158,14 @@ function EventView(props: { data: GetEventResponse }) {
         when={event().commentsOpen}
         fallback={<p class={styles.closed}>コメントの受付は停止中です</p>}
       >
+        <Show when={session.error}>
+          <div class={styles.sessionError} role="alert">
+            <span>参加の確認に失敗しました。</span>
+            <button type="button" class={button.secondary} onClick={() => retrySession()}>
+              再試行
+            </button>
+          </div>
+        </Show>
         <form class={styles.composer} onSubmit={(e) => e.preventDefault()}>
           <textarea
             class={styles.input}

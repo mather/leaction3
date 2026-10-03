@@ -104,3 +104,10 @@ export function createEventInputSchema(limits: Limits) {
 
 export type CreateEventInput = v.InferInput<ReturnType<typeof createEventInputSchema>>;
 export type CreateEventData = v.InferOutput<ReturnType<typeof createEventInputSchema>>;
+
+/** 参加者セッションの発行（POST /api/session） */
+export const createSessionInputSchema = v.object({
+  turnstileToken: v.optional(v.string()),
+});
+
+export type CreateSessionInput = v.InferInput<typeof createSessionInputSchema>;
