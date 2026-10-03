@@ -31,7 +31,8 @@ src/
     components/
     lib/             ws クライアント、API クライアント
   worker/
-    index.ts         Worker エントリ（ルーティング、OGP 差し込み、Cookie）
+    index.ts         Worker エントリ（ルーティング、Cookie）
+    ogp.ts           /e/:id への OGP 差し込み（HTMLRewriter）
     event-room.ts    Durable Object「EventRoom」
     auth.ts          Cookie 署名、トークンのハッシュ化・照合
     turnstile.ts

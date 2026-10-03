@@ -1,0 +1,52 @@
+.sheet {
+  width: 100%;
+  max-width: 640px;
+  max-height: 80dvh;
+  margin: auto auto 0;
+  padding: 0;
+  border: none;
+  border-radius: var(--radius-sheet) var(--radius-sheet) 0 0;
+  background: var(--surface);
+  color: var(--text);
+}
+
+.sheet::backdrop {
+  background: rgb(27 31 36 / 0.4);
+}
+
+/* 余白は内側に持たせ、<dialog> 自体の領域 = シートにする（背景のクリック判定のため） */
+.inner {
+  display: grid;
+  gap: 8px;
+  padding: 8px 16px calc(16px + env(safe-area-inset-bottom));
+}
+
+.header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.title {
+  margin: 0;
+  font-size: 1rem;
+  font-weight: 700;
+}
+
+.close {
+  display: grid;
+  place-items: center;
+  width: var(--tap-min);
+  height: var(--tap-min);
+  margin-right: -10px;
+  border: none;
+  border-radius: 50%;
+  background: none;
+  color: var(--text-sub);
+  cursor: pointer;
+}
+
+.close:hover {
+  background: var(--surface-sub);
+}
