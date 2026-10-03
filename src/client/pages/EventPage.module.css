@@ -1,0 +1,260 @@
+/* ヘッダー・発表切り替えバー・コメント一覧・入力欄の 4 段。コメント一覧だけがスクロールする */
+.page {
+  display: flex;
+  flex-direction: column;
+  height: 100dvh;
+  max-width: 640px;
+  margin: 0 auto;
+}
+
+.status {
+  display: grid;
+  justify-items: center;
+  gap: 12px;
+  max-width: 480px;
+  margin: 0 auto;
+  padding: 48px 16px;
+  color: var(--text-sub);
+  text-align: center;
+}
+
+.status p {
+  margin: 0;
+}
+
+.header {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 4px 4px 4px 16px;
+  background: var(--surface);
+  border-bottom: 1px solid var(--line);
+}
+
+.logo {
+  flex: none;
+  margin-right: 6px;
+  font-family: var(--font-logo);
+  font-weight: 800;
+  font-size: 1rem;
+  color: var(--accent);
+}
+
+.eventName {
+  flex: 1;
+  min-width: 0;
+  margin: 0;
+  overflow: hidden;
+  font-size: 1rem;
+  font-weight: 700;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.iconButton {
+  flex: none;
+  display: grid;
+  place-items: center;
+  width: var(--tap-min);
+  height: var(--tap-min);
+  padding: 0;
+  border: none;
+  border-radius: 50%;
+  background: none;
+  color: var(--text);
+  cursor: pointer;
+}
+
+.iconButton:not(:disabled):hover {
+  background: var(--surface-sub);
+}
+
+.iconButton:disabled {
+  color: var(--line-strong);
+  cursor: default;
+}
+
+.talkBar {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 4px;
+  background: var(--surface);
+  border-bottom: 1px solid var(--line);
+}
+
+.talkCurrent {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  min-height: var(--tap-min);
+  padding: 0 12px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-control);
+  background: var(--surface-sub);
+  color: var(--text);
+  font: inherit;
+  cursor: pointer;
+}
+
+.talkPosition {
+  flex: none;
+  color: var(--accent);
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+}
+
+.talkLabel {
+  min-width: 0;
+  overflow: hidden;
+  font-weight: 500;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.comments {
+  flex: 1;
+  overflow-y: auto;
+  padding: 16px;
+}
+
+.empty {
+  margin: 48px 0 0;
+  color: var(--text-sub);
+  text-align: center;
+}
+
+.composer {
+  display: flex;
+  align-items: flex-end;
+  gap: 8px;
+  padding: 8px 12px calc(8px + env(safe-area-inset-bottom));
+  background: var(--surface);
+  border-top: 1px solid var(--line);
+}
+
+.input {
+  flex: 1;
+  min-width: 0;
+  min-height: var(--tap-min);
+  max-height: 8lh;
+  padding: 9px 12px;
+  border: 1px solid var(--line-strong);
+  border-radius: var(--radius-control);
+  background: var(--surface-sub);
+  color: var(--text);
+  font: inherit;
+  /* iOS の自動ズームを防ぐため 16px 以上 */
+  font-size: 16px;
+  resize: none;
+  field-sizing: content;
+}
+
+.send {
+  flex: none;
+  display: grid;
+  place-items: center;
+  width: var(--tap-min);
+  height: var(--tap-min);
+  padding: 0;
+  border: none;
+  border-radius: 50%;
+  background: var(--accent);
+  color: #fff;
+  cursor: pointer;
+}
+
+.send:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+.closed {
+  margin: 0;
+  padding: 14px 16px calc(14px + env(safe-area-inset-bottom));
+  background: var(--surface-sub);
+  border-top: 1px solid var(--line);
+  color: var(--text-sub);
+  text-align: center;
+}
+
+.talkList {
+  display: grid;
+  gap: 4px;
+  margin: 0;
+  padding: 0;
+  overflow-y: auto;
+  list-style: none;
+}
+
+.talkItem {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  width: 100%;
+  min-height: var(--tap-min);
+  padding: 10px 12px;
+  border: 1px solid transparent;
+  border-radius: var(--radius-control);
+  background: none;
+  color: var(--text);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.talkItem:hover {
+  background: var(--surface-sub);
+}
+
+.talkItem[aria-current="true"] {
+  border-color: var(--accent);
+  background: var(--accent-soft);
+}
+
+.talkNumber {
+  flex: none;
+  min-width: 1.5em;
+  color: var(--text-sub);
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+}
+
+.talkItem[aria-current="true"] .talkNumber {
+  color: var(--accent);
+}
+
+.talkItemText {
+  display: grid;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.talkSpeaker {
+  font-weight: 700;
+}
+
+.talkTitle {
+  color: var(--text-sub);
+  font-size: 0.875rem;
+}
+
+.menuItem {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  min-height: var(--tap-min);
+  padding: 10px 12px;
+  border-radius: var(--radius-control);
+  color: var(--text);
+  font-weight: 500;
+  text-decoration: none;
+}
+
+.menuItem:hover {
+  background: var(--surface-sub);
+}

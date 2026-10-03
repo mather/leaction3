@@ -19,6 +19,23 @@ const PATHS = {
   plus: () => <path d="M12 5v14M5 12h14" />,
   close: () => <path d="M6 6l12 12M18 6L6 18" />,
   chevron: () => <path d="M9 6l6 6-6 6" />,
+  chevronLeft: () => <path d="M15 6l-6 6 6 6" />,
+  share: () => (
+    <>
+      <path d="M12 3v12" />
+      <path d="M7.5 7.5L12 3l4.5 4.5" />
+      <path d="M5 12v7a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2v-7" />
+    </>
+  ),
+  menu: () => <path d="M4 7h16M4 12h16M4 17h16" />,
+  send: () => <path d="M4 12l16-8-6 16-2.5-6.5z" />,
+  external: () => (
+    <>
+      <path d="M14 4h6v6" />
+      <path d="M20 4l-9 9" />
+      <path d="M18 14v5a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V7a1 1 0 0 1 1-1h5" />
+    </>
+  ),
   alert: () => (
     <>
       <path d="M12 3l9.5 17h-19z" />

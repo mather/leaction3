@@ -1,4 +1,9 @@
-import type { CreateEventRequest, CreateEventResponse, ErrorResponse } from "../../shared/api";
+import type {
+  CreateEventRequest,
+  CreateEventResponse,
+  ErrorResponse,
+  GetEventResponse,
+} from "../../shared/api";
 
 export class ApiError extends Error {
   constructor(
@@ -23,4 +28,8 @@ async function request<T>(path: string, init: RequestInit): Promise<T> {
 
 export function createEvent(input: CreateEventRequest): Promise<CreateEventResponse> {
   return request("/api/events", { method: "POST", body: JSON.stringify(input) });
+}
+
+export function getEvent(id: string): Promise<GetEventResponse> {
+  return request(`/api/events/${encodeURIComponent(id)}`, { method: "GET" });
 }

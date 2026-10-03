@@ -1,4 +1,6 @@
 import { DurableObject } from "cloudflare:workers";
+import type { GetEventResponse } from "../shared/api";
+import type { Talk } from "../shared/protocol";
 import type { CreateEventData } from "../shared/schema";
 import { randomId } from "./auth";
 
@@ -128,5 +130,37 @@ export class EventRoom extends DurableObject<Env> {
       throw err;
     }
     return { ok: true };
+  }
+
+  /** イベント情報と発表枠（並び順）。未作成・削除済みなら null。 */
+  async getEvent(): Promise<GetEventResponse | null> {
+    const sql = this.ctx.storage.sql;
+    const row = sql
+      .exec<{
+        id: string;
+        name: string;
+        date: string;
+        url: string | null;
+        hashtag: string | null;
+        comments_open: number;
+        deleted_at: number | null;
+      }>("SELECT id, name, date, url, hashtag, comments_open, deleted_at FROM event")
+      .toArray()[0];
+    if (!row || row.deleted_at !== null) return null;
+    const talks = sql
+      .exec<Talk>("SELECT id, speaker, title FROM talks ORDER BY position")
+      .toArray()
+      .map(({ id, speaker, title }) => ({ id, speaker, title }));
+    return {
+      event: {
+        id: row.id,
+        name: row.name,
+        date: row.date,
+        url: row.url,
+        hashtag: row.hashtag,
+        commentsOpen: row.comments_open === 1,
+      },
+      talks,
+    };
   }
 }
