@@ -12,7 +12,10 @@ export type ErrorResponse = {
   error: string;
 };
 
-export type { CreateEventInput as CreateEventRequest } from "./schema";
+export type {
+  CreateEventInput as CreateEventRequest,
+  CreateSessionInput as CreateSessionRequest,
+} from "./schema";
 
 /** GET /api/events/:id。コメントは WebSocket の snapshot で受け取る */
 export type GetEventResponse = {
@@ -25,4 +28,12 @@ export type CreateEventResponse = {
   id: string;
   /** 作成者トークン。ハッシュしか保存しないため、このレスポンスでしか受け取れない */
   ownerToken: string;
+};
+
+/** Turnstile の用途。ウィジェットの action に入れ、Worker で一致を確かめる */
+export type TurnstileAction = "join" | "create_event";
+
+/** GET・POST /api/session。参加者 ID そのものはクライアントに渡さない */
+export type SessionResponse = {
+  ok: true;
 };

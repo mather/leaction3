@@ -258,3 +258,16 @@
 .menuItem:hover {
   background: var(--surface-sub);
 }
+
+.sessionError {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-wrap: wrap;
+  gap: 8px 12px;
+  padding: 8px 12px;
+  background: var(--warn-soft);
+  border-top: 1px solid var(--line);
+  color: var(--warn);
+  font-size: 0.875rem;
+}

@@ -5,9 +5,23 @@ import type {
   ErrorResponse,
   GetEventResponse,
   HealthResponse,
+  SessionResponse,
 } from "../shared/api";
-import { createEventInputSchema, EventIdSchema, resolveLimits } from "../shared/schema";
-import { generateToken, hashToken, randomId } from "./auth";
+import {
+  createEventInputSchema,
+  createSessionInputSchema,
+  EventIdSchema,
+  resolveLimits,
+} from "../shared/schema";
+import {
+  cookieSecret,
+  generateToken,
+  getParticipantId,
+  hashToken,
+  issueParticipantId,
+  randomId,
+  renewParticipantId,
+} from "./auth";
 import { eventOgp, injectOgp } from "./ogp";
 import { verifyTurnstile } from "./turnstile";
 
@@ -41,6 +55,38 @@ api.get("/health", async (c) => {
   });
 });
 
+// 参加者セッション。イベントページを開いたときに GET で確かめ、なければ Turnstile を通して POST で発行する。
+// 有効な Cookie が届いたら同じ ID で出し直し、有効期限を延ばす（イベント中に切れないように）
+api.get("/session", async (c) => {
+  const secret = cookieSecret(c.env);
+  if (!secret) return c.json<ErrorResponse>({ error: "server_misconfigured" }, 500);
+  const id = await getParticipantId(c, secret);
+  if (!id) return c.json<ErrorResponse>({ error: "no_session" }, 401);
+  await renewParticipantId(c, secret, id);
+  return c.json<SessionResponse>({ ok: true });
+});
+
+api.post("/session", async (c) => {
+  const secret = cookieSecret(c.env);
+  if (!secret) return c.json<ErrorResponse>({ error: "server_misconfigured" }, 500);
+  // 有効な Cookie があれば Turnstile を通さず、同じ ID のまま有効期限だけ延ばす
+  const current = await getParticipantId(c, secret);
+  if (current) {
+    await renewParticipantId(c, secret, current);
+    return c.json<SessionResponse>({ ok: true });
+  }
+
+  const body = await c.req.json<unknown>().catch(() => undefined);
+  const parsed = v.safeParse(createSessionInputSchema, body);
+  if (!parsed.success) return c.json<ErrorResponse>({ error: "invalid_input" }, 400);
+  const ip = c.req.header("CF-Connecting-IP");
+  if (!(await verifyTurnstile(c.env, parsed.output.turnstileToken, ip, "join"))) {
+    return c.json<ErrorResponse>({ error: "turnstile_failed" }, 403);
+  }
+  await issueParticipantId(c, secret);
+  return c.json<SessionResponse>({ ok: true });
+});
+
 /** ID の衝突時に作り直す回数の上限（64^8 通りなので実際にはまず衝突しない） */
 const MAX_ID_ATTEMPTS = 5;
 
@@ -51,7 +97,7 @@ api.post("/events", async (c) => {
   const { turnstileToken, ...event } = parsed.output;
 
   const ip = c.req.header("CF-Connecting-IP");
-  if (!(await verifyTurnstile(c.env, turnstileToken, ip))) {
+  if (!(await verifyTurnstile(c.env, turnstileToken, ip, "create_event"))) {
     return c.json<ErrorResponse>({ error: "turnstile_failed" }, 403);
   }
 

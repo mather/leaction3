@@ -1,4 +1,14 @@
-# ローカルで上限値を変えるときは .dev.vars にコピーして編集する（src/shared/schema.ts の LIMIT_ENV_KEYS）
+# ローカル開発用。.dev.vars にコピーして使う
+
+# 参加者 Cookie の署名鍵（必須）。本番は `wrangler secret put COOKIE_SECRET` で設定する
+# 生成例: openssl rand -base64 32
+COOKIE_SECRET=change-me
+
+# Turnstile の秘密鍵。未設定なら検証を省略する。本番は `wrangler secret put TURNSTILE_SECRET_KEY`
+# テスト用キー（常に成功）: 1x0000000000000000000000000000000AA
+# TURNSTILE_SECRET_KEY=
+
+# 上限値の上書き（src/shared/schema.ts の LIMIT_ENV_KEYS）
 # LIMIT_RATE_COUNT=20
 # LIMIT_RATE_WINDOW_SEC=10
 # LIMIT_COMMENT_MAX_LENGTH=500

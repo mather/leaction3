@@ -65,7 +65,7 @@ export function NewEvent() {
 
     setSubmitting(true);
     try {
-      const turnstileToken = await getTurnstileToken();
+      const turnstileToken = await getTurnstileToken("create_event");
       const res = await createEvent({ ...input, turnstileToken });
       setCreated({ ...res, name: form.name.trim() });
       window.scrollTo(0, 0);

@@ -145,23 +145,46 @@ describe("EventRoom.initialize", () => {
 
 describe("verifyTurnstile", () => {
   it("秘密鍵が未設定なら検証を省略する", async () => {
-    expect(await verifyTurnstile({}, undefined, undefined)).toBe(true);
+    expect(await verifyTurnstile({}, undefined, undefined, "create_event")).toBe(true);
   });
 
   it("Siteverify に届かなければ拒否する", async () => {
     const spy = vi.spyOn(globalThis, "fetch").mockRejectedValue(new TypeError("network error"));
     try {
-      expect(await verifyTurnstile({ TURNSTILE_SECRET_KEY: "secret" }, "token", undefined)).toBe(
-        false,
-      );
+      expect(
+        await verifyTurnstile(
+          { TURNSTILE_SECRET_KEY: "secret" },
+          "token",
+          undefined,
+          "create_event",
+        ),
+      ).toBe(false);
+    } finally {
+      spy.mockRestore();
+    }
+  });
+
+  it("action が一致したときだけ通す", async () => {
+    const spy = vi
+      .spyOn(globalThis, "fetch")
+      .mockImplementation(async () => Response.json({ success: true, action: "join" }));
+    try {
+      const secretEnv = { TURNSTILE_SECRET_KEY: "secret" };
+      expect(await verifyTurnstile(secretEnv, "token", undefined, "join")).toBe(true);
+      expect(await verifyTurnstile(secretEnv, "token", undefined, "create_event")).toBe(false);
     } finally {
       spy.mockRestore();
     }
   });
 
   it("秘密鍵があるのにトークンがなければ拒否する", async () => {
-    expect(await verifyTurnstile({ TURNSTILE_SECRET_KEY: "secret" }, undefined, undefined)).toBe(
-      false,
-    );
+    expect(
+      await verifyTurnstile(
+        { TURNSTILE_SECRET_KEY: "secret" },
+        undefined,
+        undefined,
+        "create_event",
+      ),
+    ).toBe(false);
   });
 });

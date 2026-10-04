@@ -1,9 +1,12 @@
 import type {
   CreateEventRequest,
   CreateEventResponse,
+  CreateSessionRequest,
   ErrorResponse,
   GetEventResponse,
+  SessionResponse,
 } from "../../shared/api";
+import { getTurnstileToken } from "./turnstile";
 
 export class ApiError extends Error {
   constructor(
@@ -32,4 +35,19 @@ export function createEvent(input: CreateEventRequest): Promise<CreateEventRespo
 
 export function getEvent(id: string): Promise<GetEventResponse> {
   return request(`/api/events/${encodeURIComponent(id)}`, { method: "GET" });
+}
+
+/**
+ * 参加者セッション（参加者 ID の Cookie）を用意する。
+ * すでに Cookie があれば何もせず、なければ Turnstile を 1 回通して発行してもらう。
+ */
+export async function ensureSession(): Promise<void> {
+  try {
+    await request<SessionResponse>("/api/session", { method: "GET" });
+    return;
+  } catch (err) {
+    if (!(err instanceof ApiError && err.code === "no_session")) throw err;
+  }
+  const input: CreateSessionRequest = { turnstileToken: await getTurnstileToken("join") };
+  await request<SessionResponse>("/api/session", { method: "POST", body: JSON.stringify(input) });
 }
