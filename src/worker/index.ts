@@ -165,7 +165,8 @@ api.post("/session", async (c) => {
 /** ID の衝突時に作り直す回数の上限（64^8 通りなので実際にはまず衝突しない） */
 const MAX_ID_ATTEMPTS = 5;
 
-api.post("/events", async (c) => {
+// `/api/events` で終わる URL はコンテンツブロッカーに遮断されるので `/new` を付ける（#27）
+api.post("/events/new", async (c) => {
   const body = await c.req.json<unknown>().catch(() => undefined);
   const parsed = v.safeParse(createEventInputSchema(resolveLimits(c.env)), body);
   if (!parsed.success) return c.json<ErrorResponse>({ error: "invalid_input" }, 400);

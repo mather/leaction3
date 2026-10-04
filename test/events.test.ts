@@ -17,14 +17,14 @@ const validInput = {
 };
 
 function postEvent(body: unknown) {
-  return exports.default.fetch("http://example.com/api/events", {
+  return exports.default.fetch("http://example.com/api/events/new", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(body),
   });
 }
 
-describe("POST /api/events", () => {
+describe("POST /api/events/new", () => {
   it("D1 と EventRoom に保存し、作成者トークンを返す", async () => {
     const res = await postEvent(validInput);
     expect(res.status).toBe(201);
@@ -56,6 +56,15 @@ describe("POST /api/events", () => {
     expect(stored.keys).toEqual([
       { role: "owner", token_hash: await hashToken(ownerToken), revoked_at: null },
     ]);
+  });
+
+  it("URL が /api/events で終わる旧パスでは作成しない（コンテンツブロッカーに遮断されるため）", async () => {
+    const res = await exports.default.fetch("http://example.com/api/events", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(validInput),
+    });
+    expect(res.status).toBe(404);
   });
 
   it("作成ごとに別の ID とトークンを発行する", async () => {

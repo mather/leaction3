@@ -12,7 +12,7 @@ export async function createEvent(): Promise<{
   ownerToken: string;
   talkIds: string[];
 }> {
-  const res = await exports.default.fetch(`${ORIGIN}/api/events`, {
+  const res = await exports.default.fetch(`${ORIGIN}/api/events/new`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({
