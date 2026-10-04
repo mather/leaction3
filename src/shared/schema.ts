@@ -155,7 +155,10 @@ function nonEmptyPatch<T extends object>(o: T): boolean {
   return Object.values(o).some((value) => value !== undefined);
 }
 
-/** イベント情報の更新（PATCH /api/events/:id）。変更した項目だけを送る。URL・ハッシュタグは null か空文字で消す */
+/**
+ * イベント情報の更新（PATCH /api/events/:id）。変更した項目だけを送る。URL・ハッシュタグは null か空文字で消す。
+ * コメント受付の一時停止もここで切り替える
+ */
 export function updateEventInputSchema(limits: Limits) {
   const f = eventFields(limits);
   return v.pipe(
@@ -164,6 +167,8 @@ export function updateEventInputSchema(limits: Limits) {
       date: v.optional(f.date),
       url: v.optional(nullableText(f.url)),
       hashtag: v.optional(nullableText(f.hashtag)),
+      /** コメントの受付。false で一時停止する */
+      commentsOpen: v.optional(v.boolean()),
     }),
     v.check(nonEmptyPatch),
   );

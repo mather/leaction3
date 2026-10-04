@@ -1,6 +1,6 @@
 import { DurableObject } from "cloudflare:workers";
 import * as v from "valibot";
-import type { AdminRole, GetAdminResponse, GetEventResponse } from "../shared/api";
+import type { AdminComment, AdminRole, GetAdminResponse, GetEventResponse } from "../shared/api";
 import {
   type ClientMessage,
   type Comment,
@@ -76,6 +76,12 @@ CREATE TABLE IF NOT EXISTS admin_keys (
 );
 CREATE TABLE IF NOT EXISTS hidden_authors (
   author_id TEXT PRIMARY KEY,
+  created_at INTEGER NOT NULL
+);
+-- 管理画面で投稿者を表すキー。参加者 ID そのものは管理者にも見せず、イベントごとに振った乱数で表す
+CREATE TABLE IF NOT EXISTS author_keys (
+  author_id TEXT PRIMARY KEY,
+  key TEXT NOT NULL UNIQUE,
   created_at INTEGER NOT NULL
 );
 -- 配信した差分の記録。seq は差分の連番で、再接続時に取りこぼした分だけを送り直すのに使う。
@@ -287,13 +293,16 @@ export class EventRoom extends DurableObject<Env> {
   async updateEvent(keyId: string, patch: UpdateEventData): Promise<AdminResult<EventInfo>> {
     if (!this.adminRole(keyId)) return fail("unauthorized");
     const sql = this.ctx.storage.sql;
-    const columns = (["name", "date", "url", "hashtag"] as const).filter(
-      (key) => patch[key] !== undefined,
-    );
+    const values: Record<string, string | number | null> = {};
+    for (const key of ["name", "date", "url", "hashtag"] as const) {
+      if (patch[key] !== undefined) values[key] = patch[key];
+    }
+    if (patch.commentsOpen !== undefined) values.comments_open = patch.commentsOpen ? 1 : 0;
+    const columns = Object.keys(values);
     this.ctx.storage.transactionSync(() => {
       sql.exec(
-        `UPDATE event SET ${columns.map((key) => `${key} = ?`).join(", ")}`,
-        ...columns.map((key) => patch[key] ?? null),
+        `UPDATE event SET ${columns.map((column) => `${column} = ?`).join(", ")}`,
+        ...Object.values(values),
       );
       this.recordUpdate("event.updated", null, Date.now());
     });
@@ -410,6 +419,135 @@ export class EventRoom extends DurableObject<Env> {
         sql.exec("UPDATE talks SET position = ? WHERE id = ?", position, id);
       });
     });
+  }
+
+  /** 管理画面のコメント一覧。非表示のものも含めて新しい順 */
+  async listComments(keyId: string): Promise<AdminResult<AdminComment[]>> {
+    if (!this.adminRole(keyId)) return fail("unauthorized");
+    return { ok: true, value: this.readAdminComments() };
+  }
+
+  /**
+   * コメントを非表示にする・表示に戻す。削除ではなく hidden フラグで管理する。
+   * 参加者には非表示を comment.removed（本文なし）、表示に戻したものを comment.added として配信する
+   */
+  async setCommentHidden(
+    keyId: string,
+    commentId: string,
+    hidden: boolean,
+  ): Promise<AdminResult<AdminComment[]>> {
+    if (!this.adminRole(keyId)) return fail("unauthorized");
+    const sql = this.ctx.storage.sql;
+    const row = sql
+      .exec<{ hidden: number }>("SELECT hidden FROM comments WHERE id = ?", commentId)
+      .toArray()[0];
+    if (!row) return fail("not_found");
+    if ((row.hidden === 1) !== hidden) this.changeHidden([commentId], hidden);
+    return { ok: true, value: this.readAdminComments() };
+  }
+
+  /**
+   * 投稿者単位で非表示にする・戻す。非表示にすると既存の投稿をすべて非表示にし、以降の投稿も非表示で受け付ける。
+   * 戻すと、その投稿者の非表示のコメントをすべて表示に戻す。authorKey は管理画面に出している投稿者のキー
+   */
+  async setAuthorHidden(
+    keyId: string,
+    authorKey: string,
+    hidden: boolean,
+  ): Promise<AdminResult<AdminComment[]>> {
+    if (!this.adminRole(keyId)) return fail("unauthorized");
+    const sql = this.ctx.storage.sql;
+    const author = sql
+      .exec<{ author_id: string }>("SELECT author_id FROM author_keys WHERE key = ?", authorKey)
+      .toArray()[0];
+    if (!author) return fail("not_found");
+    const ids = sql
+      .exec<{ id: string }>(
+        "SELECT id FROM comments WHERE author_id = ? AND hidden = ? ORDER BY created_at, rowid",
+        author.author_id,
+        hidden ? 0 : 1,
+      )
+      .toArray()
+      .map((c) => c.id);
+    this.changeHidden(ids, hidden, () => {
+      if (hidden) {
+        sql.exec(
+          "INSERT OR IGNORE INTO hidden_authors (author_id, created_at) VALUES (?, ?)",
+          author.author_id,
+          Date.now(),
+        );
+      } else {
+        sql.exec("DELETE FROM hidden_authors WHERE author_id = ?", author.author_id);
+      }
+    });
+    return { ok: true, value: this.readAdminComments() };
+  }
+
+  /**
+   * コメントの hidden を切り替え、1 件につき 1 つ差分を記録する。write は同じトランザクションで行う書き込み。
+   * 書き込みが確定してから配信する
+   */
+  private changeHidden(ids: string[], hidden: boolean, write?: () => void): void {
+    const sql = this.ctx.storage.sql;
+    const now = Date.now();
+    const changes = this.ctx.storage.transactionSync(() => {
+      write?.();
+      return ids.map((id) => {
+        sql.exec("UPDATE comments SET hidden = ? WHERE id = ?", hidden ? 1 : 0, id);
+        this.recordUpdate(hidden ? "comment.removed" : "comment.added", id, now);
+        return { id, seq: this.seq };
+      });
+    });
+    for (const { id, seq } of changes) {
+      if (hidden) {
+        this.broadcast(() => ({ type: "comment.removed", seq, commentId: id }));
+      } else {
+        // いいね数・自分の投稿か・いいね済みかは閲覧者ごとに違うので、閲覧者ごとに引き直す
+        this.broadcast((viewer) => {
+          const row = sql.exec<CommentRow>(`${COMMENT_SELECT} AND c.id = ?2`, viewer, id).one();
+          return { type: "comment.added", seq, comment: toComment(row, viewer) };
+        });
+      }
+    }
+  }
+
+  private readAdminComments(): AdminComment[] {
+    const sql = this.ctx.storage.sql;
+    // キーのない投稿者（初めて一覧に出る投稿者）にキーを振る
+    sql.exec(
+      `INSERT OR IGNORE INTO author_keys (author_id, key, created_at)
+       SELECT DISTINCT author_id, lower(hex(randomblob(8))), ? FROM comments
+       WHERE author_id NOT IN (SELECT author_id FROM author_keys)`,
+      Date.now(),
+    );
+    return sql
+      .exec<{
+        id: string;
+        talk_id: string;
+        body: string;
+        created_at: number;
+        likes: number;
+        hidden: number;
+        author_key: string;
+        author_hidden: number;
+      }>(
+        `SELECT c.id, c.talk_id, c.body, c.created_at, c.hidden, k.key AS author_key,
+          (SELECT COUNT(*) FROM likes l WHERE l.comment_id = c.id) AS likes,
+          EXISTS (SELECT 1 FROM hidden_authors h WHERE h.author_id = c.author_id) AS author_hidden
+        FROM comments c JOIN author_keys k ON k.author_id = c.author_id
+        ORDER BY c.created_at DESC, c.rowid DESC`,
+      )
+      .toArray()
+      .map((row) => ({
+        id: row.id,
+        talkId: row.talk_id,
+        body: row.body,
+        createdAt: row.created_at,
+        likes: row.likes,
+        hidden: row.hidden === 1,
+        authorKey: row.author_key,
+        authorHidden: row.author_hidden === 1,
+      }));
   }
 
   /** 発表枠を書き換え、talks.updated を配信して、変更後の発表枠を返す */
@@ -615,18 +753,27 @@ export class EventRoom extends DurableObject<Env> {
     }
 
     const id = randomId(10);
+    // 投稿者ごと非表示にされている人の投稿は、非表示で受け付けて誰にも配信しない。
+    // 本人には受け付けたことだけを伝え、送り直しを止める
+    const authorHidden =
+      sql.exec("SELECT 1 FROM hidden_authors WHERE author_id = ?", author).toArray().length > 0;
     this.ctx.storage.transactionSync(() => {
       sql.exec(
-        "INSERT INTO comments (id, talk_id, author_id, client_id, body, created_at) VALUES (?, ?, ?, ?, ?, ?)",
+        "INSERT INTO comments (id, talk_id, author_id, client_id, body, hidden, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)",
         id,
         talkId,
         author,
         clientId,
         body,
+        authorHidden ? 1 : 0,
         now,
       );
-      this.recordUpdate("comment.added", id, now);
+      if (!authorHidden) this.recordUpdate("comment.added", id, now);
     });
+    if (authorHidden) {
+      send(ws, { type: "comment.accepted", clientId, commentId: id });
+      return;
+    }
 
     const row: CommentRow = {
       id,

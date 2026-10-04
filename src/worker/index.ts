@@ -3,6 +3,7 @@ import { createMiddleware } from "hono/factory";
 import type { ContentfulStatusCode } from "hono/utils/http-status";
 import * as v from "valibot";
 import type {
+  AdminCommentsResponse,
   AdminSessionResponse,
   CreateEventResponse,
   ErrorResponse,
@@ -278,6 +279,31 @@ api.delete("/events/:id/talks/:talkId", requireAdmin, async (c) => {
   const result = await room.deleteTalk(c.var.keyId, c.req.param("talkId"));
   return adminResponse(c, result, (talks): TalksResponse => ({ talks }));
 });
+
+// モデレーション。コメント一覧（非表示も含む）、コメント単位・投稿者単位の非表示と表示に戻す操作。
+// 操作の結果として、最新のコメント一覧を返す
+
+api.get("/events/:id/admin/comments", requireAdmin, async (c) => {
+  const result = await c.env.EVENT_ROOM.getByName(c.req.param("id")).listComments(c.var.keyId);
+  return adminResponse(c, result, (comments): AdminCommentsResponse => ({ comments }));
+});
+
+for (const [action, hidden] of [
+  ["hide", true],
+  ["unhide", false],
+] as const) {
+  api.post(`/events/:id/comments/:cid/${action}`, requireAdmin, async (c) => {
+    const room = c.env.EVENT_ROOM.getByName(c.req.param("id"));
+    const result = await room.setCommentHidden(c.var.keyId, c.req.param("cid"), hidden);
+    return adminResponse(c, result, (comments): AdminCommentsResponse => ({ comments }));
+  });
+
+  api.post(`/events/:id/authors/:aid/${action}`, requireAdmin, async (c) => {
+    const room = c.env.EVENT_ROOM.getByName(c.req.param("id"));
+    const result = await room.setAuthorHidden(c.var.keyId, c.req.param("aid"), hidden);
+    return adminResponse(c, result, (comments): AdminCommentsResponse => ({ comments }));
+  });
+}
 
 api.all("*", (c) => c.json<ErrorResponse>({ error: "not_found" }, 404));
 
