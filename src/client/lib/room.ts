@@ -1,5 +1,5 @@
 import { type Accessor, createEffect, createSignal, onCleanup } from "solid-js";
-import { type ErrorCode, type TalkId, WS_SINCE_PARAM } from "../../shared/protocol";
+import { type CommentId, type ErrorCode, type TalkId, WS_SINCE_PARAM } from "../../shared/protocol";
 import { ensureSession } from "./api";
 import {
   addPending,
@@ -11,7 +11,8 @@ import {
 } from "./room-state";
 import { RoomSocket, type SocketStatus } from "./ws";
 
-export type RoomError = { code: ErrorCode; pending?: PendingComment };
+/** pending は失敗した投稿、commentId は失敗したいいね・削除の対象 */
+export type RoomError = { code: ErrorCode; pending?: PendingComment; commentId?: CommentId };
 
 function wsUrl(eventId: string, seq: number | null): string {
   const url = new URL(`/api/events/${encodeURIComponent(eventId)}/ws`, location.href);
@@ -44,7 +45,7 @@ export function createRoom(
       }
       if (message.type === "error") {
         const pending = current.pending.find((p) => p.clientId === message.clientId);
-        onError({ code: message.code, pending });
+        onError({ code: message.code, pending, commentId: message.commentId });
       }
       setState(applyServerMessage(current, message));
     },
@@ -68,5 +69,10 @@ export function createRoom(
     socket.send({ type: "comment.post", ...pending });
   };
 
-  return { state, status, post };
+  // いいね・削除は配信を待って画面に反映する。つながっていなければ送らずに false
+  const like = (commentId: CommentId, liked: boolean) =>
+    socket.send({ type: "like.set", commentId, liked });
+  const remove = (commentId: CommentId) => socket.send({ type: "comment.delete", commentId });
+
+  return { state, status, post, like, remove };
 }

@@ -50,7 +50,8 @@ export type ServerMessage =
   | { type: "talks.updated"; seq: number; talks: Talk[] }
   /** 再送された投稿がすでに登録済みだったとき、送った本人の接続にだけ返す（seq なし） */
   | { type: "comment.accepted"; clientId: string; commentId: CommentId }
-  | { type: "error"; code: ErrorCode; clientId?: string };
+  /** 投稿への応答なら clientId、いいね・削除への応答なら commentId を付ける */
+  | { type: "error"; code: ErrorCode; clientId?: string; commentId?: CommentId };
 
 /**
  * クライアント → サーバー。

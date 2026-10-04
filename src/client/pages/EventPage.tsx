@@ -54,7 +54,7 @@ export function EventPage() {
   );
 }
 
-type SheetName = "talks" | "share" | "menu" | "link";
+type SheetName = "talks" | "share" | "menu" | "link" | "delete";
 
 /** 最下部からこの距離以内なら「最下部を見ている」とみなす */
 const BOTTOM_THRESHOLD_PX = 32;
@@ -91,6 +91,11 @@ function EventView(props: { data: GetEventResponse }) {
     props.data.event.id,
     () => session.state === "ready",
     (error: RoomError) => {
+      if (error.commentId !== undefined) {
+        // いいね・削除の失敗。コメントがもう消えていれば、その知らせが届いて画面から消える
+        if (error.code !== "not_found") showNotice("操作できませんでした");
+        return;
+      }
       showNotice(ERROR_MESSAGES[error.code]);
       // 送れなかった本文は捨てず、入力欄に戻す
       const body = error.pending?.body;
@@ -131,6 +136,27 @@ function EventView(props: { data: GetEventResponse }) {
     setLinkUrl(url);
     setSheet("link");
   };
+
+  // いいね・削除は接続中だけ受け付ける（切れている間の操作は送られずに消えてしまうため）
+  const connected = () => room.status() === "open" && loaded();
+  const [deleteTarget, setDeleteTarget] = createSignal<Comment>();
+  const confirmDelete = (c: Comment) => {
+    setDeleteTarget(c);
+    setSheet("delete");
+  };
+  const deleteComment = () => {
+    const c = deleteTarget();
+    if (!c) return;
+    if (!room.remove(c.id)) showNotice("接続が切れています。再接続してからもう一度お試しください");
+    closeSheet();
+  };
+  // 削除の確認中に、そのコメントが非表示などで消えたら確認を閉じる
+  createEffect(() => {
+    const c = deleteTarget();
+    if (sheet() === "delete" && c && !room.state().comments.some((x) => x.id === c.id)) {
+      closeSheet();
+    }
+  });
 
   const move = (delta: number) => {
     const next = talks()[index() + delta];
@@ -276,16 +302,26 @@ function EventView(props: { data: GetEventResponse }) {
           >
             <ol class={styles.commentList}>
               <For each={comments()}>
-                {(c) => <CommentCard comment={c} onOpenUrl={confirmUrl} />}
+                {(c) => (
+                  <CommentCard
+                    comment={c}
+                    connected={connected()}
+                    onOpenUrl={confirmUrl}
+                    onLike={(liked) => room.like(c.id, liked)}
+                    onDelete={() => confirmDelete(c)}
+                  />
+                )}
               </For>
               <For each={pending()}>
                 {(p) => (
                   <li class={styles.card} data-pending>
-                    <p class={styles.body}>{p.body}</p>
-                    <p class={styles.meta}>
-                      <span class={styles.mine}>あなた</span>
-                      <span>送信中…</span>
-                    </p>
+                    <div class={styles.cardMain}>
+                      <p class={styles.body}>{p.body}</p>
+                      <p class={styles.meta}>
+                        <span class={styles.mine}>あなた</span>
+                        <span>送信中…</span>
+                      </p>
+                    </div>
                   </li>
                 )}
               </For>
@@ -403,6 +439,24 @@ function EventView(props: { data: GetEventResponse }) {
         </a>
       </Sheet>
 
+      <Sheet open={sheet() === "delete"} onClose={closeSheet} title="このコメントを削除しますか？">
+        <p class={styles.deletePreview}>{deleteTarget()?.body}</p>
+        <p class={styles.deleteNote}>削除すると元に戻せません。いいねも消えます。</p>
+        <div class={styles.linkActions}>
+          <button type="button" class={button.secondary} onClick={closeSheet}>
+            キャンセル
+          </button>
+          <button
+            type="button"
+            class={button.danger}
+            disabled={!connected()}
+            onClick={deleteComment}
+          >
+            削除する
+          </button>
+        </div>
+      </Sheet>
+
       <Sheet open={sheet() === "link"} onClose={closeSheet} title="この URL を開こうとしています">
         <p class={styles.linkUrl}>{linkUrl()}</p>
         <div class={styles.linkActions}>
@@ -426,20 +480,53 @@ function EventView(props: { data: GetEventResponse }) {
   );
 }
 
-function CommentCard(props: { comment: Comment; onOpenUrl: (url: string) => void }) {
+function CommentCard(props: {
+  comment: Comment;
+  /** 接続中か。切れている間はいいね・削除を押せなくする */
+  connected: boolean;
+  onOpenUrl: (url: string) => void;
+  onLike: (liked: boolean) => void;
+  onDelete: () => void;
+}) {
   return (
     <li class={styles.card}>
-      <p class={styles.body}>
-        <CommentBody body={props.comment.body} onOpenUrl={props.onOpenUrl} />
-      </p>
-      <p class={styles.meta}>
-        <Show when={props.comment.mine}>
-          <span class={styles.mine}>あなた</span>
-        </Show>
-        <time dateTime={new Date(props.comment.createdAt).toISOString()}>
-          {timeFormat.format(props.comment.createdAt)}
-        </time>
-      </p>
+      <div class={styles.cardMain}>
+        <p class={styles.body}>
+          <CommentBody body={props.comment.body} onOpenUrl={props.onOpenUrl} />
+        </p>
+        <p class={styles.meta}>
+          <Show when={props.comment.mine}>
+            <span class={styles.mine}>あなた</span>
+          </Show>
+          <time dateTime={new Date(props.comment.createdAt).toISOString()}>
+            {timeFormat.format(props.comment.createdAt)}
+          </time>
+          <Show when={props.comment.mine}>
+            <button
+              type="button"
+              class={styles.deleteButton}
+              disabled={!props.connected}
+              onClick={() => props.onDelete()}
+            >
+              <Icon name="trash" size={14} />
+              削除
+            </button>
+          </Show>
+        </p>
+      </div>
+      {/* 自分のコメントにはいいねできない（サーバーでも拒否する） */}
+      <button
+        type="button"
+        class={styles.likeButton}
+        aria-label={props.comment.mine ? "自分のコメントにはいいねできません" : "いいね"}
+        aria-pressed={props.comment.likedByMe}
+        data-liked={props.comment.likedByMe ? "" : undefined}
+        disabled={props.comment.mine || !props.connected}
+        onClick={() => props.onLike(!props.comment.likedByMe)}
+      >
+        <Icon name="heart" size={18} filled={props.comment.likedByMe} />
+        <span class={styles.likeCount}>{props.comment.likes}</span>
+      </button>
     </li>
   );
 }

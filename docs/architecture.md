@@ -87,7 +87,7 @@ flowchart LR
 | サーバー→ | `snapshot` | 接続直後に送る。イベント・発表枠・表示中の全コメント・いいね数・自分がいいねしたコメント |
 | サーバー→ | `comment.added` / `comment.removed` / `like.changed` | 差分。各メッセージに連番 `seq` を付ける |
 | サーバー→ | `comment.accepted` | 再送された投稿が登録済みだったとき、送った本人にだけ返す（`seq` なし） |
-| サーバー→ | `error` | `rate_limited` / `comments_closed` / `invalid_message` / `not_found`。投稿への応答なら `clientId` を付ける |
+| サーバー→ | `error` | `rate_limited` / `comments_closed` / `invalid_message` / `not_found`。投稿への応答なら `clientId`、いいね・削除への応答なら `commentId` を付ける |
 | サーバー→ | `event.updated` / `talks.updated` | 管理操作の反映 |
 | クライアント→ | `comment.post` | `talkId`, `body`, クライアント生成の `clientId`（二重送信防止・自分の投稿の照合） |
 | クライアント→ | `comment.delete` / `like.set` | 自分のコメントの削除、いいねの付け外し |
@@ -98,6 +98,9 @@ flowchart LR
 - WebSocket Hibernation API を使い、発言がない間は DO を休止させて実行時間の課金を止める
 - 死活確認はクライアントが `ping` を送り、`setWebSocketAutoResponse` で DO を起こさずに `pong` を返す
 - 非表示にしたコメントは参加者には `comment.removed` として配信し、本文を送らない
+- `like.changed` の `likedByMe` は、いいねを付け外した本人の接続にだけ付ける（他の人の状態は変わらないため）。状態が変わらない `like.set`（いいね済みへのいいね等）は何も配信しない
+- 自分のコメントへのいいねは `invalid_message`、他人のコメントの削除は `not_found` で拒否する。自分のコメントの削除は非表示と違い、コメントといいねを実際に消す
+- 送り直す差分は 1 件につき必ず 1 通にして `seq` を飛ばさない。その後に非表示・削除されたコメントの差分は `comment.removed` として送る
 
 ## スパム対策・セキュリティ
 

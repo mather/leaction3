@@ -37,6 +37,14 @@
   background: var(--surface-sub);
 }
 
+/* 取り消せない操作（削除など） */
+.danger {
+  composes: base;
+  border: 1px solid var(--warn);
+  background: var(--warn);
+  color: #fff;
+}
+
 .block {
   width: 100%;
   min-height: 52px;
