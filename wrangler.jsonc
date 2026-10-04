@@ -15,8 +15,7 @@
     {
       "binding": "DB",
       "database_name": "leaction",
-      // 本番の ID は `wrangler d1 create leaction` の結果に置き換える
-      "database_id": "00000000-0000-0000-0000-000000000000",
+      "database_id": "86f57304-2664-4d9f-8091-1748b5119120",
       "migrations_dir": "migrations"
     }
   ],
@@ -34,8 +33,7 @@
         {
           "binding": "DB",
           "database_name": "leaction-preview",
-          // `wrangler d1 create leaction-preview` の結果に置き換える
-          "database_id": "00000000-0000-0000-0000-000000000000",
+          "database_id": "49845c15-544c-4326-bbf5-eeaf30af5d23",
           "migrations_dir": "migrations"
         }
       ],

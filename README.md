@@ -35,7 +35,7 @@ GitHub Actions（[`.github/workflows/ci.yml`](.github/workflows/ci.yml)）で行
 
 ### 初回の設定
 
-1. Cloudflare で D1 を作り、`wrangler.jsonc` の `database_id`（本番とプレビューの 2 か所）を出力された ID に置き換える
+1. Cloudflare で D1 を作り、`wrangler.jsonc` の `database_id`（本番とプレビューの 2 か所）を出力された ID に置き換える（作成済み）。`d1 create` がバインディングを追加するか聞いてきたら断る
 
    ```sh
    pnpm wrangler d1 create leaction
