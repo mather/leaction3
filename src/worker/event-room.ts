@@ -1,6 +1,13 @@
 import { DurableObject } from "cloudflare:workers";
 import * as v from "valibot";
-import type { AdminComment, AdminRole, GetAdminResponse, GetEventResponse } from "../shared/api";
+import type {
+  AdminComment,
+  AdminKey,
+  AdminRole,
+  EventDeletion,
+  GetAdminResponse,
+  GetEventResponse,
+} from "../shared/api";
 import {
   type ClientMessage,
   type Comment,
@@ -8,6 +15,7 @@ import {
   type EventInfo,
   type ServerMessage,
   type Talk,
+  WS_CLOSE_EVENT_DELETED,
   WS_PING,
   WS_PONG,
   WS_SINCE_PARAM,
@@ -157,9 +165,10 @@ export type InitializeResult = { ok: true } | { ok: false; reason: "id_taken" };
 
 /**
  * 管理操作の失敗。unauthorized は管理キーが無効化された・イベントが削除された、
- * conflict は並べ替えの ID が今の発表枠と合わない・最後の発表枠を消そうとした・発表枠が上限に達した
+ * forbidden は共同管理者が作成者だけの操作をしようとした、
+ * conflict は並べ替えの ID が今の発表枠と合わない・最後の発表枠を消そうとした・発表枠や共同管理者 URL が上限に達した
  */
-export type AdminError = "unauthorized" | "not_found" | "invalid_input" | "conflict";
+export type AdminError = "unauthorized" | "forbidden" | "not_found" | "invalid_input" | "conflict";
 
 export type AdminResult<T> = { ok: true; value: T } | { ok: false; error: AdminError };
 
@@ -258,10 +267,14 @@ export class EventRoom extends DurableObject<Env> {
    * 有効なキーを全件、定数時間比較で照合する（キーは owner 1 件と manager 数件なので全件でも軽い）
    */
   async authenticate(tokenHash: string): Promise<{ keyId: string; role: AdminRole } | null> {
-    if (!this.isActive()) return null;
+    const state = this.eventState();
+    if (!state) return null;
+    // 削除済みのイベントは、復元のために作成者だけが開ける
     const keys = this.ctx.storage.sql
       .exec<{ id: string; role: AdminRole; token_hash: string }>(
-        "SELECT id, role, token_hash FROM admin_keys WHERE revoked_at IS NULL",
+        `SELECT id, role, token_hash FROM admin_keys WHERE revoked_at IS NULL${
+          state.deletedAt === null ? "" : " AND role = 'owner'"
+        }`,
       )
       .toArray();
     let found: { keyId: string; role: AdminRole } | null = null;
@@ -272,18 +285,168 @@ export class EventRoom extends DurableObject<Env> {
     return found;
   }
 
-  /** 管理画面の表示に使う、権限・イベント情報・発表枠・発表ごとのコメント数 */
+  /**
+   * 管理画面の表示に使う、権限・イベント情報・発表枠・発表ごとのコメント数。
+   * 削除済みのイベントは、復元できるよう作成者にだけ削除の状態を付けて返す
+   */
   async getAdmin(keyId: string): Promise<AdminResult<GetAdminResponse>> {
-    const role = this.adminRole(keyId);
-    const found = role && this.readEvent();
-    if (!role || !found) return fail("unauthorized");
+    const state = this.eventState();
+    const role = this.keyRole(keyId);
+    const found = this.readEvent({ includeDeleted: true });
+    if (!state || !role || !found) return fail("unauthorized");
+    if (state.deletedAt !== null && role !== "owner") return fail("unauthorized");
     const commentCounts: Record<string, number> = {};
     for (const row of this.ctx.storage.sql.exec<{ talk_id: string; count: number }>(
       "SELECT talk_id, COUNT(*) AS count FROM comments GROUP BY talk_id",
     )) {
       commentCounts[row.talk_id] = row.count;
     }
-    return { ok: true, value: { role, ...found, commentCounts } };
+    const deletion = state.deletedAt === null ? null : this.deletion(state.deletedAt);
+    return { ok: true, value: { role, ...found, commentCounts, deletion } };
+  }
+
+  // 作成者だけの操作。共同管理者 URL の発行・無効化と、イベントの削除・復元
+
+  /** 共同管理者 URL の一覧（無効化したものも含む、新しい順） */
+  async listAdminKeys(keyId: string): Promise<AdminResult<AdminKey[]>> {
+    const error = this.ownerError(keyId);
+    if (error) return fail(error);
+    return { ok: true, value: this.readAdminKeys() };
+  }
+
+  /** 共同管理者 URL を発行する。トークンは Worker が作り、ハッシュだけを受け取って保存する */
+  async createAdminKey(keyId: string, tokenHash: string): Promise<AdminResult<AdminKey>> {
+    const error = this.ownerError(keyId);
+    if (error) return fail(error);
+    const sql = this.ctx.storage.sql;
+    const active = sql
+      .exec<{ count: number }>(
+        "SELECT COUNT(*) AS count FROM admin_keys WHERE role = 'manager' AND revoked_at IS NULL",
+      )
+      .one().count;
+    if (active >= this.limits.managerKeysMaxCount) return fail("conflict");
+    const key: AdminKey = { id: randomId(), createdAt: Date.now(), revokedAt: null };
+    sql.exec(
+      "INSERT INTO admin_keys (id, role, token_hash, created_at) VALUES (?, 'manager', ?, ?)",
+      key.id,
+      tokenHash,
+      key.createdAt,
+    );
+    return { ok: true, value: key };
+  }
+
+  /**
+   * 共同管理者 URL を無効化する。管理操作のたびにキーを確かめるので、
+   * その URL から作られた管理セッションもすぐに使えなくなる。作成者の URL は無効化できない
+   */
+  async revokeAdminKey(keyId: string, targetId: string): Promise<AdminResult<AdminKey[]>> {
+    const error = this.ownerError(keyId);
+    if (error) return fail(error);
+    const sql = this.ctx.storage.sql;
+    const target = sql
+      .exec<{ role: AdminRole }>("SELECT role FROM admin_keys WHERE id = ?", targetId)
+      .toArray()[0];
+    if (target?.role !== "manager") return fail("not_found");
+    sql.exec(
+      "UPDATE admin_keys SET revoked_at = ? WHERE id = ? AND revoked_at IS NULL",
+      Date.now(),
+      targetId,
+    );
+    return { ok: true, value: this.readAdminKeys() };
+  }
+
+  /**
+   * イベントを論理削除する。参加者からは見えなくし、接続も閉じる。
+   * 復元の期限にアラームを仕掛け、それまでに復元されなければ全データを消す
+   */
+  async deleteEvent(keyId: string): Promise<AdminResult<EventDeletion>> {
+    const error = this.ownerError(keyId);
+    if (error) return fail(error);
+    const now = Date.now();
+    this.ctx.storage.sql.exec("UPDATE event SET deleted_at = ?", now);
+    const deletion = this.deletion(now);
+    await this.ctx.storage.setAlarm(deletion.restorableUntil);
+    for (const ws of this.ctx.getWebSockets()) {
+      try {
+        ws.close(WS_CLOSE_EVENT_DELETED, "event deleted");
+      } catch {
+        // すでに閉じている
+      }
+    }
+    await this.syncIndexDeletion();
+    return { ok: true, value: deletion };
+  }
+
+  /** 削除したイベントを復元する。期限を過ぎていたら not_found（データはもう消えている扱い） */
+  async restoreEvent(keyId: string): Promise<AdminResult<GetAdminResponse>> {
+    const state = this.eventState();
+    const role = this.keyRole(keyId);
+    if (!state || !role) return fail("unauthorized");
+    if (state.deletedAt === null) {
+      // 削除されていなければ何もしない（二重に押したときなど）
+      return role === "owner" ? this.getAdmin(keyId) : fail("forbidden");
+    }
+    if (role !== "owner") return fail("unauthorized");
+    if (Date.now() >= this.deletion(state.deletedAt).restorableUntil) return fail("not_found");
+    this.ctx.storage.sql.exec("UPDATE event SET deleted_at = NULL");
+    await this.ctx.storage.deleteAlarm();
+    await this.syncIndexDeletion();
+    return this.getAdmin(keyId);
+  }
+
+  /**
+   * 削除から復元の期限が過ぎたら、この DO の全データと D1 の索引を消す。
+   * 復元されていれば何もしない
+   */
+  override async alarm(): Promise<void> {
+    const sql = this.ctx.storage.sql;
+    const row = sql
+      .exec<{ id: string; deleted_at: number | null }>("SELECT id, deleted_at FROM event")
+      .toArray()[0];
+    if (!row || row.deleted_at === null) return;
+    const { restorableUntil } = this.deletion(row.deleted_at);
+    if (Date.now() < restorableUntil) {
+      // 期限の設定が延びたときなど。期限に仕掛け直す
+      await this.ctx.storage.setAlarm(restorableUntil);
+      return;
+    }
+    // 索引を先に消す。D1 が失敗したらアラームごと失敗させ、再試行に任せる
+    await this.env.DB.prepare("DELETE FROM events WHERE id = ?").bind(row.id).run();
+    await this.ctx.storage.deleteAll();
+    // 同じインスタンスがこの後も呼ばれたときのために、空の表を作り直す
+    sql.exec(SCHEMA);
+    this.seq = 0;
+  }
+
+  private deletion(deletedAt: number): EventDeletion {
+    return {
+      deletedAt,
+      restorableUntil: deletedAt + this.limits.deletedRetentionDays * 24 * 60 * 60 * 1000,
+    };
+  }
+
+  /**
+   * D1 の索引の deleted_at を、この DO の値に合わせる。
+   * 待つ間に削除と復元が割り込んで書き込みの順番が入れ替わらないよう、他のリクエストを止めて最新の値を書く
+   */
+  private async syncIndexDeletion(): Promise<void> {
+    await this.ctx.blockConcurrencyWhile(async () => {
+      const row = this.ctx.storage.sql
+        .exec<{ id: string; deleted_at: number | null }>("SELECT id, deleted_at FROM event")
+        .one();
+      await this.env.DB.prepare("UPDATE events SET deleted_at = ? WHERE id = ?")
+        .bind(row.deleted_at, row.id)
+        .run();
+    });
+  }
+
+  private readAdminKeys(): AdminKey[] {
+    return this.ctx.storage.sql
+      .exec<{ id: string; created_at: number; revoked_at: number | null }>(
+        "SELECT id, created_at, revoked_at FROM admin_keys WHERE role = 'manager' ORDER BY created_at DESC, rowid DESC",
+      )
+      .toArray()
+      .map((row) => ({ id: row.id, createdAt: row.created_at, revokedAt: row.revoked_at }));
   }
 
   /**
@@ -563,7 +726,18 @@ export class EventRoom extends DurableObject<Env> {
 
   /** 管理キーが有効なら権限を返す。無効化済み・存在しない・イベントが削除済みなら null */
   private adminRole(keyId: string): AdminRole | null {
-    if (!this.isActive()) return null;
+    return this.isActive() ? this.keyRole(keyId) : null;
+  }
+
+  /** 作成者だけの操作を許すか。許さないときは、その理由 */
+  private ownerError(keyId: string): AdminError | null {
+    const role = this.adminRole(keyId);
+    if (!role) return "unauthorized";
+    return role === "owner" ? null : "forbidden";
+  }
+
+  /** 管理キーが無効化されていなければ権限を返す。イベントが削除済みかは見ない */
+  private keyRole(keyId: string): AdminRole | null {
     const row = this.ctx.storage.sql
       .exec<{ role: AdminRole }>(
         "SELECT role FROM admin_keys WHERE id = ? AND revoked_at IS NULL",
@@ -573,7 +747,8 @@ export class EventRoom extends DurableObject<Env> {
     return row?.role ?? null;
   }
 
-  private readEvent(): GetEventResponse | null {
+  /** イベント情報と発表枠。未作成なら null。削除済みも null（includeDeleted なら返す） */
+  private readEvent(options: { includeDeleted?: boolean } = {}): GetEventResponse | null {
     const sql = this.ctx.storage.sql;
     const row = sql
       .exec<{
@@ -586,7 +761,7 @@ export class EventRoom extends DurableObject<Env> {
         deleted_at: number | null;
       }>("SELECT id, name, date, url, hashtag, comments_open, deleted_at FROM event")
       .toArray()[0];
-    if (!row || row.deleted_at !== null) return null;
+    if (!row || (row.deleted_at !== null && !options.includeDeleted)) return null;
     const talks = this.readTalks();
     return {
       event: {
@@ -664,10 +839,15 @@ export class EventRoom extends DurableObject<Env> {
 
   /** イベントが作成済みで、削除されていないか */
   private isActive(): boolean {
+    return this.eventState()?.deletedAt === null;
+  }
+
+  /** イベントの削除の状態。未作成（または削除後に全データを消した）なら null */
+  private eventState(): { deletedAt: number | null } | null {
     const row = this.ctx.storage.sql
       .exec<{ deleted_at: number | null }>("SELECT deleted_at FROM event")
       .toArray()[0];
-    return row !== undefined && row.deleted_at === null;
+    return row ? { deletedAt: row.deleted_at } : null;
   }
 
   /**

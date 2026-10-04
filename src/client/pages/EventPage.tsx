@@ -236,265 +236,278 @@ function EventView(props: { data: GetEventResponse }) {
   };
 
   return (
-    <div class={styles.page}>
-      <header class={styles.header}>
-        {/* ロゴとイベント名はリンクにしない（誤タップでページを離れないため） */}
-        <span class={styles.logo}>LeacTion!</span>
-        <h1 class={styles.eventName}>{event().name}</h1>
-        <button
-          type="button"
-          class={styles.iconButton}
-          aria-label="共有"
-          onClick={() => setSheet("share")}
-        >
-          <Icon name="share" />
-        </button>
-        <button
-          type="button"
-          class={styles.iconButton}
-          aria-label="メニュー"
-          onClick={() => setSheet("menu")}
-        >
-          <Icon name="menu" />
-        </button>
-      </header>
-
-      <Show when={talk()}>
-        {(t) => (
-          <nav class={styles.talkBar} aria-label="発表の切り替え">
-            <button
-              type="button"
-              class={styles.iconButton}
-              aria-label="前の発表"
-              disabled={index() <= 0}
-              onClick={() => move(-1)}
-            >
-              <Icon name="chevronLeft" />
-            </button>
-            <button
-              type="button"
-              class={styles.talkCurrent}
-              aria-haspopup="dialog"
-              onClick={() => setSheet("talks")}
-            >
-              <span class={styles.talkPosition}>
-                {index() + 1}/{talks().length}
-              </span>
-              <span class={styles.talkLabel}>{talkLabel(t())}</span>
-            </button>
-            <button
-              type="button"
-              class={styles.iconButton}
-              aria-label="次の発表"
-              disabled={index() >= talks().length - 1}
-              onClick={() => move(1)}
-            >
-              <Icon name="chevron" />
-            </button>
-          </nav>
-        )}
-      </Show>
-
-      <div class={styles.commentsArea}>
-        <main ref={list} class={styles.comments} onScroll={onScroll}>
-          <Show
-            when={comments().length > 0 || pending().length > 0}
-            fallback={
-              <Show
-                when={loaded()}
-                fallback={<p class={styles.empty}>コメントを読み込んでいます…</p>}
-              >
-                <p class={styles.empty}>
-                  まだコメントはありません。
-                  <br />
-                  最初のひとことをどうぞ。ログインは不要です。
-                </p>
-              </Show>
-            }
+    <Show
+      when={!room.gone()}
+      fallback={
+        <div class={styles.status}>
+          <p>このイベントは削除されました。</p>
+        </div>
+      }
+    >
+      <div class={styles.page}>
+        <header class={styles.header}>
+          {/* ロゴとイベント名はリンクにしない（誤タップでページを離れないため） */}
+          <span class={styles.logo}>LeacTion!</span>
+          <h1 class={styles.eventName}>{event().name}</h1>
+          <button
+            type="button"
+            class={styles.iconButton}
+            aria-label="共有"
+            onClick={() => setSheet("share")}
           >
-            <ol class={styles.commentList}>
-              <For each={comments()}>
-                {(c) => (
-                  <CommentCard
-                    comment={c}
-                    connected={connected()}
-                    onOpenUrl={confirmUrl}
-                    onLike={(liked) => room.like(c.id, liked)}
-                    onDelete={() => confirmDelete(c)}
-                  />
-                )}
-              </For>
-              <For each={pending()}>
-                {(p) => (
-                  <li class={styles.card} data-pending>
-                    <div class={styles.cardMain}>
-                      <p class={styles.body}>{p.body}</p>
-                      <p class={styles.meta}>
-                        <span class={styles.mine}>あなた</span>
-                        <span>送信中…</span>
-                      </p>
-                    </div>
-                  </li>
-                )}
-              </For>
-            </ol>
-          </Show>
-        </main>
-        <Show when={unread() > 0 && !atBottom()}>
-          <button type="button" class={styles.newPill} onClick={scrollToBottom}>
-            新着コメント {unread()} 件
-            <Icon name="arrowDown" size={16} />
-          </button>
-        </Show>
-      </div>
-
-      <Show
-        when={event().commentsOpen}
-        fallback={<p class={styles.closed}>コメントの受付は停止中です</p>}
-      >
-        <Show when={session.error}>
-          <div class={styles.sessionError} role="alert">
-            <span>参加の確認に失敗しました。</span>
-            <button type="button" class={button.secondary} onClick={() => retrySession()}>
-              再試行
-            </button>
-          </div>
-        </Show>
-        <Show when={session.state === "ready" && room.status() === "reconnecting"}>
-          <p class={styles.connection} role="status">
-            接続が切れました。再接続しています…
-          </p>
-        </Show>
-        <Show when={notice()}>
-          <p class={styles.notice} role="alert">
-            {notice()}
-          </p>
-        </Show>
-        <form
-          class={styles.composer}
-          onSubmit={(e) => {
-            e.preventDefault();
-            submit();
-          }}
-        >
-          <textarea
-            class={styles.input}
-            rows={1}
-            aria-label="コメント"
-            placeholder={placeholder()}
-            value={draft()}
-            onInput={(e) => setDraft(e.currentTarget.value)}
-            onKeyDown={(e) => {
-              // Enter だけなら改行。Shift・⌘・Ctrl と一緒なら送信（変換確定の Enter は除く）
-              if (e.key !== "Enter" || e.isComposing) return;
-              if (!(e.shiftKey || e.metaKey || e.ctrlKey)) return;
-              e.preventDefault();
-              submit();
-            }}
-          />
-          <Show when={DEFAULT_LIMITS.commentMaxLength - length() < COUNTER_FROM}>
-            <span class={styles.counter} data-over={overLimit() ? "" : undefined}>
-              {length()}/{DEFAULT_LIMITS.commentMaxLength}
-            </span>
-          </Show>
-          <button type="submit" class={styles.send} aria-label="送信" disabled={!canSend()}>
-            <Icon name="send" />
-          </button>
-        </form>
-      </Show>
-
-      <Sheet open={sheet() === "talks"} onClose={closeSheet} title="発表一覧">
-        <ol class={styles.talkList}>
-          <For each={talks()}>
-            {(t, i) => (
-              <li>
-                <button
-                  type="button"
-                  class={styles.talkItem}
-                  aria-current={t.id === talkId() ? "true" : undefined}
-                  onClick={() => {
-                    setTalkId(t.id);
-                    closeSheet();
-                  }}
-                >
-                  <span class={styles.talkNumber}>{i() + 1}</span>
-                  <span class={styles.talkItemText}>
-                    <Show when={t.speaker !== ""}>
-                      <span class={styles.talkSpeaker}>{t.speaker}</span>
-                    </Show>
-                    <Show when={t.title !== ""}>
-                      <span class={styles.talkTitle}>{t.title}</span>
-                    </Show>
-                  </span>
-                  <Show when={loaded()}>
-                    <span class={styles.talkCount}>
-                      <Icon name="comment" size={16} />
-                      {counts().get(t.id) ?? 0}
-                    </span>
-                  </Show>
-                </button>
-              </li>
-            )}
-          </For>
-        </ol>
-      </Sheet>
-
-      <Sheet open={sheet() === "share"} onClose={closeSheet} title="このイベントを共有">
-        <UrlField label="イベントページの URL" url={eventUrl(event().id)} />
-      </Sheet>
-
-      <Sheet open={sheet() === "menu"} onClose={closeSheet} title="メニュー">
-        {/* 外へ出る導線は新しいタブで開き、イベントページを残す */}
-        <a class={styles.menuItem} href="/" target="_blank" rel="noopener">
-          LeacTion! について・イベントを作る
-          <Icon name="external" />
-        </a>
-        <Show when={isAdmin()}>
-          <A class={styles.menuItem} href={`/e/${encodeURIComponent(event().id)}/manage`}>
-            イベントを管理する
-            <Icon name="chevron" />
-          </A>
-        </Show>
-      </Sheet>
-
-      <Sheet open={sheet() === "delete"} onClose={closeSheet} title="このコメントを削除しますか？">
-        <p class={styles.deletePreview}>{deleteTarget()?.body}</p>
-        <p class={styles.deleteNote}>削除すると元に戻せません。いいねも消えます。</p>
-        <div class={styles.linkActions}>
-          <button type="button" class={button.secondary} onClick={closeSheet}>
-            キャンセル
+            <Icon name="share" />
           </button>
           <button
             type="button"
-            class={button.danger}
-            disabled={!connected()}
-            onClick={deleteComment}
+            class={styles.iconButton}
+            aria-label="メニュー"
+            onClick={() => setSheet("menu")}
           >
-            削除する
+            <Icon name="menu" />
           </button>
-        </div>
-      </Sheet>
+        </header>
 
-      <Sheet open={sheet() === "link"} onClose={closeSheet} title="この URL を開こうとしています">
-        <p class={styles.linkUrl}>{linkUrl()}</p>
-        <div class={styles.linkActions}>
-          <button type="button" class={button.secondary} onClick={closeSheet}>
-            キャンセル
-          </button>
-          {/* 新しいタブで開き、イベントページを残す */}
-          <a
-            class={button.primary}
-            href={linkUrl()}
-            target="_blank"
-            rel="noopener noreferrer"
-            onClick={closeSheet}
-          >
-            開く
-            <Icon name="external" size={16} />
-          </a>
+        <Show when={talk()}>
+          {(t) => (
+            <nav class={styles.talkBar} aria-label="発表の切り替え">
+              <button
+                type="button"
+                class={styles.iconButton}
+                aria-label="前の発表"
+                disabled={index() <= 0}
+                onClick={() => move(-1)}
+              >
+                <Icon name="chevronLeft" />
+              </button>
+              <button
+                type="button"
+                class={styles.talkCurrent}
+                aria-haspopup="dialog"
+                onClick={() => setSheet("talks")}
+              >
+                <span class={styles.talkPosition}>
+                  {index() + 1}/{talks().length}
+                </span>
+                <span class={styles.talkLabel}>{talkLabel(t())}</span>
+              </button>
+              <button
+                type="button"
+                class={styles.iconButton}
+                aria-label="次の発表"
+                disabled={index() >= talks().length - 1}
+                onClick={() => move(1)}
+              >
+                <Icon name="chevron" />
+              </button>
+            </nav>
+          )}
+        </Show>
+
+        <div class={styles.commentsArea}>
+          <main ref={list} class={styles.comments} onScroll={onScroll}>
+            <Show
+              when={comments().length > 0 || pending().length > 0}
+              fallback={
+                <Show
+                  when={loaded()}
+                  fallback={<p class={styles.empty}>コメントを読み込んでいます…</p>}
+                >
+                  <p class={styles.empty}>
+                    まだコメントはありません。
+                    <br />
+                    最初のひとことをどうぞ。ログインは不要です。
+                  </p>
+                </Show>
+              }
+            >
+              <ol class={styles.commentList}>
+                <For each={comments()}>
+                  {(c) => (
+                    <CommentCard
+                      comment={c}
+                      connected={connected()}
+                      onOpenUrl={confirmUrl}
+                      onLike={(liked) => room.like(c.id, liked)}
+                      onDelete={() => confirmDelete(c)}
+                    />
+                  )}
+                </For>
+                <For each={pending()}>
+                  {(p) => (
+                    <li class={styles.card} data-pending>
+                      <div class={styles.cardMain}>
+                        <p class={styles.body}>{p.body}</p>
+                        <p class={styles.meta}>
+                          <span class={styles.mine}>あなた</span>
+                          <span>送信中…</span>
+                        </p>
+                      </div>
+                    </li>
+                  )}
+                </For>
+              </ol>
+            </Show>
+          </main>
+          <Show when={unread() > 0 && !atBottom()}>
+            <button type="button" class={styles.newPill} onClick={scrollToBottom}>
+              新着コメント {unread()} 件
+              <Icon name="arrowDown" size={16} />
+            </button>
+          </Show>
         </div>
-      </Sheet>
-    </div>
+
+        <Show
+          when={event().commentsOpen}
+          fallback={<p class={styles.closed}>コメントの受付は停止中です</p>}
+        >
+          <Show when={session.error}>
+            <div class={styles.sessionError} role="alert">
+              <span>参加の確認に失敗しました。</span>
+              <button type="button" class={button.secondary} onClick={() => retrySession()}>
+                再試行
+              </button>
+            </div>
+          </Show>
+          <Show when={session.state === "ready" && room.status() === "reconnecting"}>
+            <p class={styles.connection} role="status">
+              接続が切れました。再接続しています…
+            </p>
+          </Show>
+          <Show when={notice()}>
+            <p class={styles.notice} role="alert">
+              {notice()}
+            </p>
+          </Show>
+          <form
+            class={styles.composer}
+            onSubmit={(e) => {
+              e.preventDefault();
+              submit();
+            }}
+          >
+            <textarea
+              class={styles.input}
+              rows={1}
+              aria-label="コメント"
+              placeholder={placeholder()}
+              value={draft()}
+              onInput={(e) => setDraft(e.currentTarget.value)}
+              onKeyDown={(e) => {
+                // Enter だけなら改行。Shift・⌘・Ctrl と一緒なら送信（変換確定の Enter は除く）
+                if (e.key !== "Enter" || e.isComposing) return;
+                if (!(e.shiftKey || e.metaKey || e.ctrlKey)) return;
+                e.preventDefault();
+                submit();
+              }}
+            />
+            <Show when={DEFAULT_LIMITS.commentMaxLength - length() < COUNTER_FROM}>
+              <span class={styles.counter} data-over={overLimit() ? "" : undefined}>
+                {length()}/{DEFAULT_LIMITS.commentMaxLength}
+              </span>
+            </Show>
+            <button type="submit" class={styles.send} aria-label="送信" disabled={!canSend()}>
+              <Icon name="send" />
+            </button>
+          </form>
+        </Show>
+
+        <Sheet open={sheet() === "talks"} onClose={closeSheet} title="発表一覧">
+          <ol class={styles.talkList}>
+            <For each={talks()}>
+              {(t, i) => (
+                <li>
+                  <button
+                    type="button"
+                    class={styles.talkItem}
+                    aria-current={t.id === talkId() ? "true" : undefined}
+                    onClick={() => {
+                      setTalkId(t.id);
+                      closeSheet();
+                    }}
+                  >
+                    <span class={styles.talkNumber}>{i() + 1}</span>
+                    <span class={styles.talkItemText}>
+                      <Show when={t.speaker !== ""}>
+                        <span class={styles.talkSpeaker}>{t.speaker}</span>
+                      </Show>
+                      <Show when={t.title !== ""}>
+                        <span class={styles.talkTitle}>{t.title}</span>
+                      </Show>
+                    </span>
+                    <Show when={loaded()}>
+                      <span class={styles.talkCount}>
+                        <Icon name="comment" size={16} />
+                        {counts().get(t.id) ?? 0}
+                      </span>
+                    </Show>
+                  </button>
+                </li>
+              )}
+            </For>
+          </ol>
+        </Sheet>
+
+        <Sheet open={sheet() === "share"} onClose={closeSheet} title="このイベントを共有">
+          <UrlField label="イベントページの URL" url={eventUrl(event().id)} />
+        </Sheet>
+
+        <Sheet open={sheet() === "menu"} onClose={closeSheet} title="メニュー">
+          {/* 外へ出る導線は新しいタブで開き、イベントページを残す */}
+          <a class={styles.menuItem} href="/" target="_blank" rel="noopener">
+            LeacTion! について・イベントを作る
+            <Icon name="external" />
+          </a>
+          <Show when={isAdmin()}>
+            <A class={styles.menuItem} href={`/e/${encodeURIComponent(event().id)}/manage`}>
+              イベントを管理する
+              <Icon name="chevron" />
+            </A>
+          </Show>
+        </Sheet>
+
+        <Sheet
+          open={sheet() === "delete"}
+          onClose={closeSheet}
+          title="このコメントを削除しますか？"
+        >
+          <p class={styles.deletePreview}>{deleteTarget()?.body}</p>
+          <p class={styles.deleteNote}>削除すると元に戻せません。いいねも消えます。</p>
+          <div class={styles.linkActions}>
+            <button type="button" class={button.secondary} onClick={closeSheet}>
+              キャンセル
+            </button>
+            <button
+              type="button"
+              class={button.danger}
+              disabled={!connected()}
+              onClick={deleteComment}
+            >
+              削除する
+            </button>
+          </div>
+        </Sheet>
+
+        <Sheet open={sheet() === "link"} onClose={closeSheet} title="この URL を開こうとしています">
+          <p class={styles.linkUrl}>{linkUrl()}</p>
+          <div class={styles.linkActions}>
+            <button type="button" class={button.secondary} onClick={closeSheet}>
+              キャンセル
+            </button>
+            {/* 新しいタブで開き、イベントページを残す */}
+            <a
+              class={button.primary}
+              href={linkUrl()}
+              target="_blank"
+              rel="noopener noreferrer"
+              onClick={closeSheet}
+            >
+              開く
+              <Icon name="external" size={16} />
+            </a>
+          </div>
+        </Sheet>
+      </div>
+    </Show>
   );
 }
 

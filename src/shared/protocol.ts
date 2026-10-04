@@ -64,6 +64,12 @@ export type ClientMessage =
 
 export type ErrorCode = "rate_limited" | "comments_closed" | "invalid_message" | "not_found";
 
+/**
+ * イベントが削除されたときに、サーバーが WebSocket を閉じるコード。
+ * クライアントは再接続せず、イベントが見つからない表示にする
+ */
+export const WS_CLOSE_EVENT_DELETED = 4404;
+
 /** 再接続時に最後に受け取った seq を渡すクエリパラメータ */
 export const WS_SINCE_PARAM = "since";
 

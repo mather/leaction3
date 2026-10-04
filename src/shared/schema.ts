@@ -14,6 +14,10 @@ export const DEFAULT_LIMITS = {
   talksMaxCount: 50,
   eventUrlMaxLength: 500,
   hashtagMaxLength: 50,
+  /** 同時に有効にできる共同管理者 URL の数 */
+  managerKeysMaxCount: 20,
+  /** 削除したイベントを復元できる日数。過ぎたら全データを消す */
+  deletedRetentionDays: 7,
 } as const satisfies Record<string, number>;
 
 export type Limits = { -readonly [K in keyof typeof DEFAULT_LIMITS]: number };
@@ -29,6 +33,8 @@ export const LIMIT_ENV_KEYS = {
   talksMaxCount: "LIMIT_TALKS_MAX_COUNT",
   eventUrlMaxLength: "LIMIT_EVENT_URL_MAX_LENGTH",
   hashtagMaxLength: "LIMIT_HASHTAG_MAX_LENGTH",
+  managerKeysMaxCount: "LIMIT_MANAGER_KEYS_MAX_COUNT",
+  deletedRetentionDays: "LIMIT_DELETED_RETENTION_DAYS",
 } as const satisfies Record<keyof Limits, string>;
 
 const positiveIntFromString = v.pipe(

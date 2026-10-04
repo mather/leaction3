@@ -1,11 +1,14 @@
 import type {
   AddTalkRequest,
   AdminCommentsResponse,
+  AdminKeysResponse,
   AdminSessionResponse,
+  CreateAdminKeyResponse,
   CreateAdminSessionRequest,
   CreateEventRequest,
   CreateEventResponse,
   CreateSessionRequest,
+  DeleteEventResponse,
   ErrorResponse,
   GetAdminResponse,
   GetEventResponse,
@@ -134,4 +137,31 @@ export function setAuthorHidden(
   return request(`${eventPath(id)}/authors/${encodeURIComponent(authorKey)}/${action}`, {
     method: "POST",
   });
+}
+
+// 作成者だけの操作。共同管理者 URL の発行・無効化と、イベントの削除・復元
+
+export function getAdminKeys(id: string): Promise<AdminKeysResponse> {
+  return request(`${eventPath(id)}/admin-keys`, { method: "GET" });
+}
+
+/** 共同管理者 URL を発行する。トークンはこの応答でしか受け取れない */
+export function createAdminKey(id: string): Promise<CreateAdminKeyResponse> {
+  return request(`${eventPath(id)}/admin-keys`, { method: "POST" });
+}
+
+/** 共同管理者 URL を無効化する。結果として最新の一覧が返る */
+export function revokeAdminKey(id: string, keyId: string): Promise<AdminKeysResponse> {
+  return request(`${eventPath(id)}/admin-keys/${encodeURIComponent(keyId)}`, {
+    method: "DELETE",
+  });
+}
+
+export function deleteEvent(id: string): Promise<DeleteEventResponse> {
+  return request(eventPath(id), { method: "DELETE" });
+}
+
+/** 削除したイベントを復元する。結果として管理画面の表示内容が返る */
+export function restoreEvent(id: string): Promise<GetAdminResponse> {
+  return request(`${eventPath(id)}/restore`, { method: "POST" });
 }

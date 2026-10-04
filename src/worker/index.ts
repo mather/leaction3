@@ -4,8 +4,11 @@ import type { ContentfulStatusCode } from "hono/utils/http-status";
 import * as v from "valibot";
 import type {
   AdminCommentsResponse,
+  AdminKeysResponse,
   AdminSessionResponse,
+  CreateAdminKeyResponse,
   CreateEventResponse,
+  DeleteEventResponse,
   ErrorResponse,
   GetAdminResponse,
   GetEventResponse,
@@ -44,13 +47,18 @@ import { verifyTurnstile } from "./turnstile";
 export { EventRoom } from "./event-room";
 
 /**
- * D1 の索引からイベントを引く。存在しない・削除済みなら null。
+ * D1 の索引からイベントを引く。存在しない・削除済みなら null（includeDeleted なら削除済みも返す）。
  * 不正な ID や存在しない ID で EventRoom を起こさない（空の DO を作らない）ために使う。
  */
-async function findIndexedEvent(db: D1Database, id: string) {
+async function findIndexedEvent(
+  db: D1Database,
+  id: string,
+  options: { includeDeleted?: boolean } = {},
+) {
   if (!v.is(EventIdSchema, id)) return null;
+  const where = options.includeDeleted ? "id = ?" : "id = ? AND deleted_at IS NULL";
   return db
-    .prepare("SELECT id, name, date FROM events WHERE id = ? AND deleted_at IS NULL")
+    .prepare(`SELECT id, name, date FROM events WHERE ${where}`)
     .bind(id)
     .first<{ id: string; name: string; date: string }>();
 }
@@ -72,6 +80,7 @@ async function parseBody<T extends v.GenericSchema>(
 
 const ADMIN_ERROR_STATUS = {
   unauthorized: 401,
+  forbidden: 403,
   not_found: 404,
   invalid_input: 400,
   conflict: 409,
@@ -217,7 +226,8 @@ api.post("/events/:id/admin/session", async (c) => {
   const input = await parseBody(c, createAdminSessionInputSchema);
   if (!input) return c.json<ErrorResponse>({ error: "invalid_input" }, 400);
   const id = c.req.param("id");
-  if (!(await findIndexedEvent(c.env.DB, id))) {
+  // 削除済みのイベントも、復元のために作成者は開ける（EventRoom が作成者のトークンだけを通す）
+  if (!(await findIndexedEvent(c.env.DB, id, { includeDeleted: true }))) {
     return c.json<ErrorResponse>({ error: "not_found" }, 404);
   }
   const key = await c.env.EVENT_ROOM.getByName(id).authenticate(await hashToken(input.token));
@@ -304,6 +314,37 @@ for (const [action, hidden] of [
     return adminResponse(c, result, (comments): AdminCommentsResponse => ({ comments }));
   });
 }
+
+// 作成者だけの操作。共同管理者 URL の発行・無効化と、イベントの削除・復元。
+// 共同管理者の管理セッションでは 403 になる
+
+api.get("/events/:id/admin-keys", requireAdmin, async (c) => {
+  const result = await c.env.EVENT_ROOM.getByName(c.req.param("id")).listAdminKeys(c.var.keyId);
+  return adminResponse(c, result, (keys): AdminKeysResponse => ({ keys }));
+});
+
+api.post("/events/:id/admin-keys", requireAdmin, async (c) => {
+  const token = generateToken();
+  const room = c.env.EVENT_ROOM.getByName(c.req.param("id"));
+  const result = await room.createAdminKey(c.var.keyId, await hashToken(token));
+  return adminResponse(c, result, (key): CreateAdminKeyResponse => ({ key, token }));
+});
+
+api.delete("/events/:id/admin-keys/:keyId", requireAdmin, async (c) => {
+  const room = c.env.EVENT_ROOM.getByName(c.req.param("id"));
+  const result = await room.revokeAdminKey(c.var.keyId, c.req.param("keyId"));
+  return adminResponse(c, result, (keys): AdminKeysResponse => ({ keys }));
+});
+
+api.delete("/events/:id", requireAdmin, async (c) => {
+  const result = await c.env.EVENT_ROOM.getByName(c.req.param("id")).deleteEvent(c.var.keyId);
+  return adminResponse(c, result, (deletion): DeleteEventResponse => ({ deletion }));
+});
+
+api.post("/events/:id/restore", requireAdmin, async (c) => {
+  const result = await c.env.EVENT_ROOM.getByName(c.req.param("id")).restoreEvent(c.var.keyId);
+  return adminResponse(c, result, (value): GetAdminResponse => value);
+});
 
 api.all("*", (c) => c.json<ErrorResponse>({ error: "not_found" }, 404));
 

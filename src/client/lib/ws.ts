@@ -1,4 +1,10 @@
-import { type ClientMessage, type ServerMessage, WS_PING, WS_PONG } from "../../shared/protocol";
+import {
+  type ClientMessage,
+  type ServerMessage,
+  WS_CLOSE_EVENT_DELETED,
+  WS_PING,
+  WS_PONG,
+} from "../../shared/protocol";
 
 // EventRoom への WebSocket 接続。切れたら待ち時間を延ばしながら自動で再接続する。
 // 取りこぼしの補完（?since=）は接続 URL を作る側（room.ts）が受け持つ。
@@ -13,6 +19,8 @@ type Options = {
   onStatus: (status: SocketStatus) => void;
   /** 再接続の前に呼ぶ。参加者 Cookie が切れていたら取り直すのに使う */
   beforeReconnect?: () => Promise<void>;
+  /** イベントが削除されて、サーバーが接続を閉じたとき。再接続はしない */
+  onGone?: () => void;
 };
 
 /** 再接続の待ち時間（最初の失敗から倍々に延ばし、上限で止める） */
@@ -92,8 +100,13 @@ export class RoomSocket {
       }
       this.options.onMessage(message);
     };
-    ws.onclose = () => {
+    ws.onclose = (e: CloseEvent) => {
       if (this.ws !== ws) return;
+      if (e.code === WS_CLOSE_EVENT_DELETED) {
+        this.stop();
+        this.options.onGone?.();
+        return;
+      }
       this.drop();
       this.scheduleRetry();
     };

@@ -483,3 +483,88 @@
 .textButton[data-danger] {
   color: var(--warn);
 }
+
+/* 管理者タブ・削除済みの画面 */
+.sectionTitle {
+  margin: 0;
+  font-size: 1rem;
+  font-weight: 700;
+}
+
+.cardText {
+  margin: 0;
+  font-size: 0.875rem;
+}
+
+.warnCard {
+  border-color: var(--warn);
+  background: var(--warn-soft);
+}
+
+.warnCard .sectionTitle {
+  color: var(--warn);
+}
+
+.errorText {
+  margin: 0;
+  color: var(--warn);
+  font-size: 0.875rem;
+}
+
+.issued {
+  display: grid;
+  gap: 8px;
+  padding: 12px;
+  border: 1px solid var(--warn);
+  border-radius: var(--radius-control);
+  background: var(--warn-soft);
+}
+
+.issuedNote {
+  display: flex;
+  gap: 6px;
+  margin: 0;
+  color: var(--warn);
+  font-size: 0.875rem;
+  font-weight: 700;
+}
+
+.issuedNote svg {
+  flex: none;
+}
+
+.keys {
+  display: grid;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.key {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 8px 0;
+  border-top: 1px solid var(--line);
+}
+
+.keyInfo {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+}
+
+.keyName {
+  font-weight: 700;
+}
+
+.keyMeta {
+  color: var(--text-sub);
+  font-size: 0.8125rem;
+}
+
+.key[data-revoked] .keyName {
+  color: var(--text-sub);
+  text-decoration: line-through;
+}

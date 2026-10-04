@@ -32,6 +32,8 @@ export function createRoom(
 ) {
   const [state, setState] = createSignal<RoomState>(initialRoomState);
   const [status, setStatus] = createSignal<SocketStatus>("connecting");
+  /** イベントが削除され、サーバーが接続を閉じた */
+  const [gone, setGone] = createSignal(false);
 
   const socket = new RoomSocket({
     url: () => wsUrl(eventId, state().seq),
@@ -55,6 +57,7 @@ export function createRoom(
       for (const p of state().pending) socket.send({ type: "comment.post", ...p });
     },
     beforeReconnect: ensureSession,
+    onGone: () => setGone(true),
   });
 
   createEffect(() => {
@@ -74,5 +77,5 @@ export function createRoom(
     socket.send({ type: "like.set", commentId, liked });
   const remove = (commentId: CommentId) => socket.send({ type: "comment.delete", commentId });
 
-  return { state, status, post, like, remove };
+  return { state, status, gone, post, like, remove };
 }
