@@ -1,10 +1,11 @@
 import { DurableObject } from "cloudflare:workers";
 import * as v from "valibot";
-import type { GetEventResponse } from "../shared/api";
+import type { AdminRole, GetAdminResponse, GetEventResponse } from "../shared/api";
 import {
   type ClientMessage,
   type Comment,
   type ErrorCode,
+  type EventInfo,
   type ServerMessage,
   type Talk,
   WS_PING,
@@ -14,11 +15,15 @@ import {
 import {
   type CreateEventData,
   clientMessageSchema,
+  isValidTalk,
   type Limits,
   maxClientMessageLength,
   resolveLimits,
+  type TalkData,
+  type UpdateEventData,
+  type UpdateTalkData,
 } from "../shared/schema";
-import { randomId } from "./auth";
+import { randomId, timingSafeEqual } from "./auth";
 
 // EventRoom 内の SQLite。docs/architecture.md「データモデル」を参照。
 // 時刻は UNIX エポックからのミリ秒。
@@ -74,7 +79,8 @@ CREATE TABLE IF NOT EXISTS hidden_authors (
   created_at INTEGER NOT NULL
 );
 -- 配信した差分の記録。seq は差分の連番で、再接続時に取りこぼした分だけを送り直すのに使う。
--- 本文などは持たず、送り直すときに今の comments から組み立てる（その間に非表示になったものは送らない）
+-- 本文などは持たず、送り直すときに今の comments から組み立てる（その間に非表示になったものは送らない）。
+-- event.updated・talks.updated は comment_id を持たず、送り直すときは今のイベント情報・発表枠を送る
 CREATE TABLE IF NOT EXISTS updates (
   seq INTEGER PRIMARY KEY,
   type TEXT NOT NULL,
@@ -89,7 +95,12 @@ export const PARTICIPANT_HEADER = "X-Participant-Id";
 /** 再接続時の補完に使う差分の保持件数。これより古い seq からの再接続には snapshot を送る */
 const UPDATES_RETAINED = 1000;
 
-type UpdateType = "comment.added" | "comment.removed" | "like.changed";
+type UpdateType =
+  | "comment.added"
+  | "comment.removed"
+  | "like.changed"
+  | "event.updated"
+  | "talks.updated";
 
 type CommentRow = {
   id: string;
@@ -137,6 +148,16 @@ export type InitializeParams = {
 };
 
 export type InitializeResult = { ok: true } | { ok: false; reason: "id_taken" };
+
+/**
+ * 管理操作の失敗。unauthorized は管理キーが無効化された・イベントが削除された、
+ * conflict は並べ替えの ID が今の発表枠と合わない・最後の発表枠を消そうとした・発表枠が上限に達した
+ */
+export type AdminError = "unauthorized" | "not_found" | "invalid_input" | "conflict";
+
+export type AdminResult<T> = { ok: true; value: T } | { ok: false; error: AdminError };
+
+const fail = (error: AdminError): { ok: false; error: AdminError } => ({ ok: false, error });
 
 /**
  * 1 イベント = 1 インスタンス。イベントへの書き込みはすべてここを通して直列化する。
@@ -223,6 +244,197 @@ export class EventRoom extends DurableObject<Env> {
     return this.readEvent();
   }
 
+  // 管理操作。Worker が Origin と管理セッション Cookie を確かめ、Cookie の管理キー ID を渡してくる。
+  // キーが無効化されていないかはここで毎回確かめる（無効化したら、そのキーの管理セッションも使えなくする）
+
+  /**
+   * 管理 URL のトークン（のハッシュ）を照合し、一致した管理キーを返す。
+   * 有効なキーを全件、定数時間比較で照合する（キーは owner 1 件と manager 数件なので全件でも軽い）
+   */
+  async authenticate(tokenHash: string): Promise<{ keyId: string; role: AdminRole } | null> {
+    if (!this.isActive()) return null;
+    const keys = this.ctx.storage.sql
+      .exec<{ id: string; role: AdminRole; token_hash: string }>(
+        "SELECT id, role, token_hash FROM admin_keys WHERE revoked_at IS NULL",
+      )
+      .toArray();
+    let found: { keyId: string; role: AdminRole } | null = null;
+    for (const key of keys) {
+      // 一致しても途中で抜けず、照合にかかる時間をキーの順番に依存させない
+      if (timingSafeEqual(key.token_hash, tokenHash)) found = { keyId: key.id, role: key.role };
+    }
+    return found;
+  }
+
+  /** 管理画面の表示に使う、権限・イベント情報・発表枠・発表ごとのコメント数 */
+  async getAdmin(keyId: string): Promise<AdminResult<GetAdminResponse>> {
+    const role = this.adminRole(keyId);
+    const found = role && this.readEvent();
+    if (!role || !found) return fail("unauthorized");
+    const commentCounts: Record<string, number> = {};
+    for (const row of this.ctx.storage.sql.exec<{ talk_id: string; count: number }>(
+      "SELECT talk_id, COUNT(*) AS count FROM comments GROUP BY talk_id",
+    )) {
+      commentCounts[row.talk_id] = row.count;
+    }
+    return { ok: true, value: { role, ...found, commentCounts } };
+  }
+
+  /**
+   * イベント情報を更新する（変更した項目だけ）。名前・開催日が変わったら D1 の索引も更新する（OGP のため）。
+   * 参加者には event.updated を配信する
+   */
+  async updateEvent(keyId: string, patch: UpdateEventData): Promise<AdminResult<EventInfo>> {
+    if (!this.adminRole(keyId)) return fail("unauthorized");
+    const sql = this.ctx.storage.sql;
+    const columns = (["name", "date", "url", "hashtag"] as const).filter(
+      (key) => patch[key] !== undefined,
+    );
+    this.ctx.storage.transactionSync(() => {
+      sql.exec(
+        `UPDATE event SET ${columns.map((key) => `${key} = ?`).join(", ")}`,
+        ...columns.map((key) => patch[key] ?? null),
+      );
+      this.recordUpdate("event.updated", null, Date.now());
+    });
+    const event = this.readEvent()?.event;
+    if (!event) throw new Error("event not found");
+    this.broadcast(() => ({ type: "event.updated", seq: this.seq, event }));
+
+    if (patch.name !== undefined || patch.date !== undefined) {
+      // D1 への書き込みは外部 I/O なので、待つ間に別の更新が割り込み、D1 への書き込みの順番が入れ替わりうる。
+      // 他のリクエストを止めて 1 件ずつ書き、書く直前に読んだ最新の値を入れる（古い値で上書きしない）
+      await this.ctx.blockConcurrencyWhile(async () => {
+        const latest = this.readEvent()?.event ?? event;
+        await this.env.DB.prepare("UPDATE events SET name = ?, date = ? WHERE id = ?")
+          .bind(latest.name, latest.date, latest.id)
+          .run();
+      });
+    }
+    return { ok: true, value: event };
+  }
+
+  /** 発表枠を末尾に追加する */
+  async addTalk(keyId: string, talk: TalkData): Promise<AdminResult<Talk[]>> {
+    if (!this.adminRole(keyId)) return fail("unauthorized");
+    const sql = this.ctx.storage.sql;
+    const { count, next } = sql
+      .exec<{ count: number; next: number }>(
+        "SELECT COUNT(*) AS count, COALESCE(MAX(position) + 1, 0) AS next FROM talks",
+      )
+      .one();
+    if (count >= this.limits.talksMaxCount) return fail("conflict");
+    return this.changeTalks(() => {
+      sql.exec(
+        "INSERT INTO talks (id, position, speaker, title) VALUES (?, ?, ?, ?)",
+        randomId(),
+        next,
+        talk.speaker,
+        talk.title,
+      );
+    });
+  }
+
+  /** 発表者・タイトルを編集する（変更した項目だけ）。両方が空になる変更は受け付けない */
+  async updateTalk(
+    keyId: string,
+    talkId: string,
+    patch: UpdateTalkData,
+  ): Promise<AdminResult<Talk[]>> {
+    if (!this.adminRole(keyId)) return fail("unauthorized");
+    const sql = this.ctx.storage.sql;
+    const current = sql
+      .exec<{ speaker: string; title: string }>(
+        "SELECT speaker, title FROM talks WHERE id = ?",
+        talkId,
+      )
+      .toArray()[0];
+    if (!current) return fail("not_found");
+    const next = { speaker: patch.speaker ?? current.speaker, title: patch.title ?? current.title };
+    if (!isValidTalk(next)) return fail("invalid_input");
+    return this.changeTalks(() => {
+      sql.exec(
+        "UPDATE talks SET speaker = ?, title = ? WHERE id = ?",
+        next.speaker,
+        next.title,
+        talkId,
+      );
+    });
+  }
+
+  /**
+   * 発表枠を削除する。その発表のコメントといいねも同じトランザクションで消す。
+   * 参加者の画面では、talks.updated で消えた発表のコメントを取り除く。最後の 1 枠は消せない
+   */
+  async deleteTalk(keyId: string, talkId: string): Promise<AdminResult<Talk[]>> {
+    if (!this.adminRole(keyId)) return fail("unauthorized");
+    const sql = this.ctx.storage.sql;
+    if (sql.exec("SELECT 1 FROM talks WHERE id = ?", talkId).toArray().length === 0) {
+      return fail("not_found");
+    }
+    if (sql.exec<{ count: number }>("SELECT COUNT(*) AS count FROM talks").one().count <= 1) {
+      return fail("conflict");
+    }
+    return this.changeTalks(() => {
+      sql.exec(
+        "DELETE FROM likes WHERE comment_id IN (SELECT id FROM comments WHERE talk_id = ?)",
+        talkId,
+      );
+      sql.exec("DELETE FROM comments WHERE talk_id = ?", talkId);
+      sql.exec("DELETE FROM talks WHERE id = ?", talkId);
+    });
+  }
+
+  /**
+   * 発表枠を並べ替える。ids は今あるすべての発表枠の ID を新しい順に並べたもの。
+   * 他の管理者の追加・削除と行き違って過不足があれば conflict（画面を読み込み直してもらう）
+   */
+  async reorderTalks(keyId: string, ids: string[]): Promise<AdminResult<Talk[]>> {
+    if (!this.adminRole(keyId)) return fail("unauthorized");
+    const sql = this.ctx.storage.sql;
+    const current = new Set(
+      sql
+        .exec<{ id: string }>("SELECT id FROM talks")
+        .toArray()
+        .map((t) => t.id),
+    );
+    if (
+      new Set(ids).size !== ids.length ||
+      ids.length !== current.size ||
+      !ids.every((id) => current.has(id))
+    ) {
+      return fail("conflict");
+    }
+    return this.changeTalks(() => {
+      ids.forEach((id, position) => {
+        sql.exec("UPDATE talks SET position = ? WHERE id = ?", position, id);
+      });
+    });
+  }
+
+  /** 発表枠を書き換え、talks.updated を配信して、変更後の発表枠を返す */
+  private changeTalks(write: () => void): AdminResult<Talk[]> {
+    this.ctx.storage.transactionSync(() => {
+      write();
+      this.recordUpdate("talks.updated", null, Date.now());
+    });
+    const talks = this.readTalks();
+    this.broadcast(() => ({ type: "talks.updated", seq: this.seq, talks }));
+    return { ok: true, value: talks };
+  }
+
+  /** 管理キーが有効なら権限を返す。無効化済み・存在しない・イベントが削除済みなら null */
+  private adminRole(keyId: string): AdminRole | null {
+    if (!this.isActive()) return null;
+    const row = this.ctx.storage.sql
+      .exec<{ role: AdminRole }>(
+        "SELECT role FROM admin_keys WHERE id = ? AND revoked_at IS NULL",
+        keyId,
+      )
+      .toArray()[0];
+    return row?.role ?? null;
+  }
+
   private readEvent(): GetEventResponse | null {
     const sql = this.ctx.storage.sql;
     const row = sql
@@ -237,10 +449,7 @@ export class EventRoom extends DurableObject<Env> {
       }>("SELECT id, name, date, url, hashtag, comments_open, deleted_at FROM event")
       .toArray()[0];
     if (!row || row.deleted_at !== null) return null;
-    const talks = sql
-      .exec<Talk>("SELECT id, speaker, title FROM talks ORDER BY position")
-      .toArray()
-      .map(({ id, speaker, title }) => ({ id, speaker, title }));
+    const talks = this.readTalks();
     return {
       event: {
         id: row.id,
@@ -252,6 +461,13 @@ export class EventRoom extends DurableObject<Env> {
       },
       talks,
     };
+  }
+
+  private readTalks(): Talk[] {
+    return this.ctx.storage.sql
+      .exec<Talk>("SELECT id, speaker, title FROM talks ORDER BY position")
+      .toArray()
+      .map(({ id, speaker, title }) => ({ id, speaker, title }));
   }
 
   /**
@@ -328,7 +544,7 @@ export class EventRoom extends DurableObject<Env> {
         .one().seq;
       if (since === this.seq || (oldest !== null && since >= oldest - 1)) {
         const updates = sql
-          .exec<{ seq: number; type: UpdateType; comment_id: string }>(
+          .exec<{ seq: number; type: UpdateType; comment_id: string | null }>(
             "SELECT seq, type, comment_id FROM updates WHERE seq > ? ORDER BY seq",
             since,
           )
@@ -343,12 +559,22 @@ export class EventRoom extends DurableObject<Env> {
             .toArray()
             .map((row) => [row.id, toComment(row, viewer)]),
         );
+        const current = this.readEvent();
+        if (!current) throw new Error("event not found");
         // seq が飛ぶとクライアントは取りこぼしとみなして接続し直すので、差分 1 件につき必ず 1 通送る
         return updates.map((u): ServerMessage => {
-          const comment = comments.get(u.comment_id);
+          // イベント情報・発表枠は送り直す時点の内容。同じ差分が続いても結果は変わらない
+          if (u.type === "event.updated") {
+            return { type: "event.updated", seq: u.seq, event: current.event };
+          }
+          if (u.type === "talks.updated") {
+            return { type: "talks.updated", seq: u.seq, talks: current.talks };
+          }
+          const commentId = u.comment_id ?? "";
+          const comment = comments.get(commentId);
           // その後に非表示・削除されたコメントは本文を送らず、消えたことだけを伝える
           if (u.type === "comment.removed" || !comment) {
-            return { type: "comment.removed", seq: u.seq, commentId: u.comment_id };
+            return { type: "comment.removed", seq: u.seq, commentId };
           }
           if (u.type === "comment.added") return { type: "comment.added", seq: u.seq, comment };
           // いいね数は送り直す時点の値。同じコメントの差分が続いても結果は変わらない
@@ -542,7 +768,7 @@ export class EventRoom extends DurableObject<Env> {
   }
 
   /** 差分を記録して seq を進める。古い差分は保持件数を超えた分だけ消す。トランザクション内で呼ぶ */
-  private recordUpdate(type: UpdateType, commentId: string, now: number): void {
+  private recordUpdate(type: UpdateType, commentId: string | null, now: number): void {
     const sql = this.ctx.storage.sql;
     const seq = this.seq + 1;
     sql.exec(

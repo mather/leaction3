@@ -1,4 +1,4 @@
-import { useParams } from "@solidjs/router";
+import { A, useParams } from "@solidjs/router";
 import {
   createEffect,
   createMemo,
@@ -19,7 +19,7 @@ import { CommentBody } from "../components/CommentBody";
 import { Icon } from "../components/Icon";
 import { Sheet } from "../components/Sheet";
 import { UrlField } from "../components/UrlField";
-import { ApiError, ensureSession, getEvent } from "../lib/api";
+import { ApiError, ensureSession, getAdmin, getEvent } from "../lib/api";
 import { loadLastViewedTalk, saveLastViewedTalk } from "../lib/last-talk";
 import { createRoom, type RoomError } from "../lib/room";
 import { commentPlaceholder, pickInitialTalk, talkLabel } from "../lib/talks";
@@ -116,6 +116,10 @@ function EventView(props: { data: GetEventResponse }) {
   );
   const index = () => talks().findIndex((t) => t.id === talkId());
   const talk = () => talks()[index()];
+  // 見ていた発表枠が管理者に削除されたら、1 番目の発表に移る
+  createEffect(() => {
+    if (index() === -1) setTalkId(talks()[0]?.id);
+  });
 
   // 選んだ発表を ?tid= に反映する。ルーターの遷移にせず履歴も積まない
   createEffect(() => {
@@ -128,6 +132,14 @@ function EventView(props: { data: GetEventResponse }) {
     }
     saveLastViewedTalk(event().id, id);
   });
+
+  // この端末に管理セッションがあるときだけ、メニューに「イベントを管理する」を出す
+  const [isAdmin] = createResource(() =>
+    getAdmin(props.data.event.id).then(
+      () => true,
+      () => false,
+    ),
+  );
 
   const [sheet, setSheet] = createSignal<SheetName>();
   const closeSheet = () => setSheet(undefined);
@@ -437,6 +449,12 @@ function EventView(props: { data: GetEventResponse }) {
           LeacTion! について・イベントを作る
           <Icon name="external" />
         </a>
+        <Show when={isAdmin()}>
+          <A class={styles.menuItem} href={`/e/${encodeURIComponent(event().id)}/manage`}>
+            イベントを管理する
+            <Icon name="chevron" />
+          </A>
+        </Show>
       </Sheet>
 
       <Sheet open={sheet() === "delete"} onClose={closeSheet} title="このコメントを削除しますか？">

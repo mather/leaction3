@@ -1,10 +1,19 @@
 import type {
+  AddTalkRequest,
+  AdminSessionResponse,
+  CreateAdminSessionRequest,
   CreateEventRequest,
   CreateEventResponse,
   CreateSessionRequest,
   ErrorResponse,
+  GetAdminResponse,
   GetEventResponse,
+  ReorderTalksRequest,
   SessionResponse,
+  TalksResponse,
+  UpdateEventRequest,
+  UpdateEventResponse,
+  UpdateTalkRequest,
 } from "../../shared/api";
 import { getTurnstileToken } from "./turnstile";
 
@@ -50,4 +59,50 @@ export async function ensureSession(): Promise<void> {
   }
   const input: CreateSessionRequest = { turnstileToken: await getTurnstileToken("join") };
   await request<SessionResponse>("/api/session", { method: "POST", body: JSON.stringify(input) });
+}
+
+// 管理操作。管理セッションは HttpOnly Cookie なので、ここでは扱わずブラウザに任せる
+
+const eventPath = (id: string) => `/api/events/${encodeURIComponent(id)}`;
+const talkPath = (id: string, talkId: string) =>
+  `${eventPath(id)}/talks/${encodeURIComponent(talkId)}`;
+
+/** 管理 URL の `#k=` のトークンを、イベント単位の管理セッション Cookie に入れ替えてもらう */
+export function createAdminSession(id: string, token: string): Promise<AdminSessionResponse> {
+  const input: CreateAdminSessionRequest = { token };
+  return request(`${eventPath(id)}/admin/session`, {
+    method: "POST",
+    body: JSON.stringify(input),
+  });
+}
+
+/** 管理画面の表示内容。管理セッションがなければ 401（ApiError） */
+export function getAdmin(id: string): Promise<GetAdminResponse> {
+  return request(`${eventPath(id)}/admin`, { method: "GET" });
+}
+
+/** イベント情報の更新。変更した項目だけを送る */
+export function updateEvent(id: string, input: UpdateEventRequest): Promise<UpdateEventResponse> {
+  return request(eventPath(id), { method: "PATCH", body: JSON.stringify(input) });
+}
+
+export function addTalk(id: string, input: AddTalkRequest): Promise<TalksResponse> {
+  return request(`${eventPath(id)}/talks`, { method: "POST", body: JSON.stringify(input) });
+}
+
+export function updateTalk(
+  id: string,
+  talkId: string,
+  input: UpdateTalkRequest,
+): Promise<TalksResponse> {
+  return request(talkPath(id, talkId), { method: "PATCH", body: JSON.stringify(input) });
+}
+
+export function deleteTalk(id: string, talkId: string): Promise<TalksResponse> {
+  return request(talkPath(id, talkId), { method: "DELETE" });
+}
+
+export function reorderTalks(id: string, ids: string[]): Promise<TalksResponse> {
+  const input: ReorderTalksRequest = { ids };
+  return request(`${eventPath(id)}/talks/order`, { method: "PUT", body: JSON.stringify(input) });
 }

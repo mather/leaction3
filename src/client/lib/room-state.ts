@@ -86,8 +86,15 @@ export function applyServerMessage(state: RoomState, message: ServerMessage): Ro
       };
     case "event.updated":
       return { ...next, event: message.event };
-    case "talks.updated":
-      return { ...next, talks: message.talks };
+    case "talks.updated": {
+      // 削除された発表のコメントは、サーバーでも一緒に消えている
+      const ids = new Set(message.talks.map((t) => t.id));
+      return {
+        ...next,
+        talks: message.talks,
+        comments: state.comments.filter((c) => ids.has(c.talkId)),
+      };
+    }
   }
 }
 
