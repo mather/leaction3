@@ -20,6 +20,7 @@ import {
   hashToken,
   issueParticipantId,
   randomId,
+  renewParticipantId,
 } from "./auth";
 import { eventOgp, injectOgp } from "./ogp";
 import { verifyTurnstile } from "./turnstile";
@@ -54,21 +55,26 @@ api.get("/health", async (c) => {
   });
 });
 
-// 参加者セッション。イベントページを開いたときに GET で確かめ、なければ Turnstile を通して POST で発行する
+// 参加者セッション。イベントページを開いたときに GET で確かめ、なければ Turnstile を通して POST で発行する。
+// 有効な Cookie が届いたら同じ ID で出し直し、有効期限を延ばす（イベント中に切れないように）
 api.get("/session", async (c) => {
   const secret = cookieSecret(c.env);
   if (!secret) return c.json<ErrorResponse>({ error: "server_misconfigured" }, 500);
-  if (!(await getParticipantId(c, secret))) {
-    return c.json<ErrorResponse>({ error: "no_session" }, 401);
-  }
+  const id = await getParticipantId(c, secret);
+  if (!id) return c.json<ErrorResponse>({ error: "no_session" }, 401);
+  await renewParticipantId(c, secret, id);
   return c.json<SessionResponse>({ ok: true });
 });
 
 api.post("/session", async (c) => {
   const secret = cookieSecret(c.env);
   if (!secret) return c.json<ErrorResponse>({ error: "server_misconfigured" }, 500);
-  // 有効な Cookie があれば Turnstile を通さず、同じ ID を使い続ける
-  if (await getParticipantId(c, secret)) return c.json<SessionResponse>({ ok: true });
+  // 有効な Cookie があれば Turnstile を通さず、同じ ID のまま有効期限だけ延ばす
+  const current = await getParticipantId(c, secret);
+  if (current) {
+    await renewParticipantId(c, secret, current);
+    return c.json<SessionResponse>({ ok: true });
+  }
 
   const body = await c.req.json<unknown>().catch(() => undefined);
   const parsed = v.safeParse(createSessionInputSchema, body);

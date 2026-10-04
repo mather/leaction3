@@ -56,12 +56,24 @@ export async function getParticipantId(c: Context, secret: string): Promise<stri
 /** 新しい参加者 ID を発行し、署名付き Cookie に入れる。 */
 export async function issueParticipantId(c: Context, secret: string): Promise<string> {
   const id = randomId(PARTICIPANT_ID_SIZE);
-  await setSignedCookie(c, PARTICIPANT_COOKIE, id, secret, {
+  await setParticipantCookie(c, secret, id);
+  return id;
+}
+
+/**
+ * 同じ参加者 ID で Cookie を出し直し、有効期限をいまから延ばす。
+ * イベントページを開くたびに呼ぶので、イベントの最中に期限が切れることはない。
+ */
+export async function renewParticipantId(c: Context, secret: string, id: string): Promise<void> {
+  await setParticipantCookie(c, secret, id);
+}
+
+function setParticipantCookie(c: Context, secret: string, id: string): Promise<void> {
+  return setSignedCookie(c, PARTICIPANT_COOKIE, id, secret, {
     path: "/",
     httpOnly: true,
     secure: true,
     sameSite: "Lax",
     maxAge: PARTICIPANT_COOKIE_MAX_AGE_SEC,
   });
-  return id;
 }

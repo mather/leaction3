@@ -66,7 +66,7 @@ flowchart LR
 | --- | --- | --- |
 | `GET /`、`GET /new` | 誰でも | SPA の HTML。サービス共通の OGP |
 | `GET /e/:id` | 誰でも | SPA の HTML。イベント名入りの OGP を差し込む |
-| `GET /api/session` | 誰でも | 有効な参加者 Cookie があるかを返す（ないときは 401） |
+| `GET /api/session` | 誰でも | 有効な参加者 Cookie があるかを返す（ないときは 401）。あれば同じ ID で出し直して有効期限を延ばす |
 | `POST /api/session` | 誰でも | Turnstile トークンを検証し、参加者 ID の Cookie を発行。有効な Cookie があれば検証せずそのまま使う |
 | `POST /api/events` | 誰でも（Turnstile 必須） | イベント作成。返り値に作成者トークンを一度だけ含める |
 | `GET /api/events/:id` | 誰でも | イベント情報と発表枠 |
@@ -114,6 +114,7 @@ flowchart LR
 
 - コメントはプレーンテキストとして扱い、HTML として解釈しない。URL はリンク化するが、開く前に確認を出す
 - Cookie は `HttpOnly; Secure; SameSite=Lax`。値は `COOKIE_SECRET` で HMAC-SHA256 署名する。参加者 ID はクライアントに返さない
+- 参加者 Cookie の有効期限は 1 年。イベントページを開くたびに同じ ID で出し直して延ばすので、イベントの最中には切れない
 - Turnstile は用途ごとに action（`join`・`create_event`）を付け、Worker で一致を確かめる
 - 管理操作の HTTP は `Origin` ヘッダーを検証して CSRF を防ぐ
 - WebSocket 接続時も `Origin` を検証する

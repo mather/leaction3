@@ -57,11 +57,24 @@ describe("参加者セッション", () => {
     expect((await getSession("pid=AAAAAAAAAAAAAAAA")).status).toBe(401);
   });
 
-  it("有効な Cookie があれば Turnstile を通さず、Cookie も作り直さない", async () => {
+  it("GET は同じ ID で Cookie を出し直し、有効期限を延ばす", async () => {
+    const cookie = cookiePair(await postSession({}));
+    const res = await getSession(cookie);
+    expect(res.status).toBe(200);
+    const header = res.headers.get("Set-Cookie") ?? "";
+    expect(header.split(";")[0]).toBe(cookie);
+    expect(header).toContain(`Max-Age=${365 * 24 * 60 * 60}`);
+  });
+
+  it("有効な Cookie があれば POST は Turnstile を通さず、同じ ID で出し直す", async () => {
     const cookie = cookiePair(await postSession({}));
     const res = await postSession({}, cookie, { ...env, TURNSTILE_SECRET_KEY: "secret" });
     expect(res.status).toBe(200);
-    expect(res.headers.get("Set-Cookie")).toBeNull();
+    expect(cookiePair(res)).toBe(cookie);
+  });
+
+  it("Cookie がなければ GET は Cookie を出さない", async () => {
+    expect((await getSession()).headers.get("Set-Cookie")).toBeNull();
   });
 
   it("Turnstile に失敗したら Cookie を発行しない", async () => {
