@@ -496,3 +496,19 @@
   grid-template-columns: 1fr 1fr;
   gap: 8px;
 }
+
+.share {
+  display: grid;
+  gap: 16px;
+}
+
+.qr {
+  display: flex;
+  justify-content: center;
+}
+
+.qr svg {
+  border-radius: var(--radius-control);
+  max-width: 100%;
+  height: auto;
+}
