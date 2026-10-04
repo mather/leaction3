@@ -117,6 +117,7 @@
 
 .comments {
   flex: 1;
+  min-height: 0;
   overflow-y: auto;
   padding: 16px;
 }
@@ -270,4 +271,140 @@
   border-top: 1px solid var(--line);
   color: var(--warn);
   font-size: 0.875rem;
+}
+
+/* コメント一覧と、その上に重ねる新着ピル */
+.commentsArea {
+  position: relative;
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.commentList {
+  display: grid;
+  gap: 8px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.card {
+  padding: 10px 14px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-card);
+  background: var(--surface);
+}
+
+.card[data-pending] {
+  opacity: 0.6;
+}
+
+.body {
+  margin: 0;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.body a {
+  color: var(--accent);
+}
+
+.meta {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 4px 0 0;
+  color: var(--text-sub);
+  font-size: 0.75rem;
+  font-variant-numeric: tabular-nums;
+}
+
+.mine {
+  padding: 0 8px;
+  border-radius: 999px;
+  background: var(--accent-soft);
+  color: var(--accent);
+  font-weight: 700;
+}
+
+.newPill {
+  position: absolute;
+  left: 50%;
+  bottom: 12px;
+  transform: translateX(-50%);
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-height: var(--tap-min);
+  padding: 0 18px;
+  border: none;
+  border-radius: 999px;
+  background: var(--accent);
+  color: #fff;
+  font: inherit;
+  font-size: 0.875rem;
+  font-weight: 700;
+  white-space: nowrap;
+  box-shadow: 0 4px 12px rgb(27 31 36 / 0.2);
+  cursor: pointer;
+}
+
+.connection,
+.notice {
+  margin: 0;
+  padding: 8px 12px;
+  border-top: 1px solid var(--line);
+  font-size: 0.875rem;
+  text-align: center;
+}
+
+.connection {
+  background: var(--surface-sub);
+  color: var(--text-sub);
+}
+
+.notice {
+  background: var(--warn-soft);
+  color: var(--warn);
+}
+
+.counter {
+  flex: none;
+  align-self: center;
+  color: var(--text-sub);
+  font-size: 0.75rem;
+  font-variant-numeric: tabular-nums;
+}
+
+.counter[data-over] {
+  color: var(--warn);
+  font-weight: 700;
+}
+
+.talkCount {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  margin-left: auto;
+  color: var(--text-sub);
+  font-size: 0.875rem;
+  font-variant-numeric: tabular-nums;
+}
+
+.linkUrl {
+  margin: 0;
+  padding: 10px 12px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-control);
+  background: var(--surface-sub);
+  overflow-wrap: anywhere;
+}
+
+.linkActions {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
 }

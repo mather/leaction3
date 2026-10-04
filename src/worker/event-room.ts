@@ -1,7 +1,23 @@
 import { DurableObject } from "cloudflare:workers";
+import * as v from "valibot";
 import type { GetEventResponse } from "../shared/api";
-import type { Talk } from "../shared/protocol";
-import type { CreateEventData } from "../shared/schema";
+import {
+  type ClientMessage,
+  type Comment,
+  type ErrorCode,
+  type ServerMessage,
+  type Talk,
+  WS_PING,
+  WS_PONG,
+  WS_SINCE_PARAM,
+} from "../shared/protocol";
+import {
+  type CreateEventData,
+  clientMessageSchema,
+  type Limits,
+  maxClientMessageLength,
+  resolveLimits,
+} from "../shared/schema";
 import { randomId } from "./auth";
 
 // EventRoom 内の SQLite。docs/architecture.md「データモデル」を参照。
@@ -29,12 +45,17 @@ CREATE TABLE IF NOT EXISTS comments (
   id TEXT PRIMARY KEY,
   talk_id TEXT NOT NULL,
   author_id TEXT NOT NULL,
+  client_id TEXT NOT NULL,
   body TEXT NOT NULL,
   kind TEXT NOT NULL DEFAULT 'comment',
   hidden INTEGER NOT NULL DEFAULT 0,
   created_at INTEGER NOT NULL
 );
 CREATE INDEX IF NOT EXISTS comments_talk ON comments (talk_id, created_at);
+-- 連投上限の判定と、投稿者単位の一括非表示に使う
+CREATE INDEX IF NOT EXISTS comments_author ON comments (author_id, created_at);
+-- 再送された同じ投稿（clientId）を二重に登録しない
+CREATE UNIQUE INDEX IF NOT EXISTS comments_client ON comments (author_id, client_id);
 CREATE TABLE IF NOT EXISTS likes (
   comment_id TEXT NOT NULL,
   voter_id TEXT NOT NULL,
@@ -52,7 +73,62 @@ CREATE TABLE IF NOT EXISTS hidden_authors (
   author_id TEXT PRIMARY KEY,
   created_at INTEGER NOT NULL
 );
+-- 配信した差分の記録。seq は差分の連番で、再接続時に取りこぼした分だけを送り直すのに使う。
+-- 本文などは持たず、送り直すときに今の comments から組み立てる（その間に非表示になったものは送らない）
+CREATE TABLE IF NOT EXISTS updates (
+  seq INTEGER PRIMARY KEY,
+  type TEXT NOT NULL,
+  comment_id TEXT,
+  created_at INTEGER NOT NULL
+);
 `;
+
+/** Worker が Cookie から取り出した参加者 ID を EventRoom に渡すヘッダー */
+export const PARTICIPANT_HEADER = "X-Participant-Id";
+
+/** 再接続時の補完に使う差分の保持件数。これより古い seq からの再接続には snapshot を送る */
+const UPDATES_RETAINED = 1000;
+
+type UpdateType = "comment.added" | "comment.removed";
+
+type CommentRow = {
+  id: string;
+  talk_id: string;
+  author_id: string;
+  client_id: string;
+  body: string;
+  created_at: number;
+  likes: number;
+  liked_by_me: number;
+};
+
+/** 表示中のコメントを、閲覧者（viewer）から見た形で引く。条件は WHERE 句に AND でつなぐ */
+const COMMENT_SELECT = `
+SELECT c.id, c.talk_id, c.author_id, c.client_id, c.body, c.created_at,
+  (SELECT COUNT(*) FROM likes l WHERE l.comment_id = c.id) AS likes,
+  EXISTS (SELECT 1 FROM likes l WHERE l.comment_id = c.id AND l.voter_id = ?1) AS liked_by_me
+FROM comments c
+WHERE c.hidden = 0`;
+
+function toComment(row: CommentRow, viewer: string): Comment {
+  const mine = row.author_id === viewer;
+  return {
+    id: row.id,
+    talkId: row.talk_id,
+    body: row.body,
+    createdAt: row.created_at,
+    likes: row.likes,
+    mine,
+    likedByMe: row.liked_by_me === 1,
+    ...(mine ? { clientId: row.client_id } : {}),
+  };
+}
+
+/** `?since=` の値。なし・不正なら null（snapshot を送る） */
+function parseSince(value: string | null): number | null {
+  if (value === null || !/^\d{1,15}$/.test(value)) return null;
+  return Number(value);
+}
 
 export type InitializeParams = {
   id: string;
@@ -67,10 +143,20 @@ export type InitializeResult = { ok: true } | { ok: false; reason: "id_taken" };
  * ストレージは SQLite API（ctx.storage.sql）を使う。
  */
 export class EventRoom extends DurableObject<Env> {
+  /** 最後に配信した差分の seq。差分がまだなければ 0 */
+  private seq = 0;
+  private readonly limits: Limits;
+
   constructor(ctx: DurableObjectState, env: Env) {
     super(ctx, env);
+    this.limits = resolveLimits(env);
+    // 死活確認の ping には DO を起こさずに応答する（休止中の課金を増やさない）
+    ctx.setWebSocketAutoResponse(new WebSocketRequestResponsePair(WS_PING, WS_PONG));
     ctx.blockConcurrencyWhile(async () => {
       ctx.storage.sql.exec(SCHEMA);
+      this.seq = ctx.storage.sql
+        .exec<{ seq: number }>("SELECT COALESCE(MAX(seq), 0) AS seq FROM updates")
+        .one().seq;
     });
   }
 
@@ -134,6 +220,10 @@ export class EventRoom extends DurableObject<Env> {
 
   /** イベント情報と発表枠（並び順）。未作成・削除済みなら null。 */
   async getEvent(): Promise<GetEventResponse | null> {
+    return this.readEvent();
+  }
+
+  private readEvent(): GetEventResponse | null {
     const sql = this.ctx.storage.sql;
     const row = sql
       .exec<{
@@ -163,4 +253,251 @@ export class EventRoom extends DurableObject<Env> {
       talks,
     };
   }
+
+  /**
+   * WebSocket の受付。Worker が参加者 Cookie と Origin を確かめ、参加者 ID をヘッダーに入れて転送してくる。
+   * Hibernation API で受け付け、メッセージがない間は DO を休止させる。
+   */
+  override async fetch(request: Request): Promise<Response> {
+    const participantId = request.headers.get(PARTICIPANT_HEADER);
+    if (!participantId || request.headers.get("Upgrade")?.toLowerCase() !== "websocket") {
+      return new Response(null, { status: 400 });
+    }
+    if (!this.isActive()) return new Response(null, { status: 404 });
+
+    const since = parseSince(new URL(request.url).searchParams.get(WS_SINCE_PARAM));
+    const { 0: client, 1: server } = new WebSocketPair();
+    // タグに参加者 ID を付け、配信時に「自分の投稿か」を閲覧者ごとに決める
+    this.ctx.acceptWebSocket(server, [participantId]);
+    for (const message of this.syncMessages(participantId, since)) send(server, message);
+    return new Response(null, { status: 101, webSocket: client });
+  }
+
+  override async webSocketMessage(ws: WebSocket, raw: string | ArrayBuffer): Promise<void> {
+    const participantId = this.ctx.getTags(ws)[0];
+    if (!participantId) return;
+    if (typeof raw !== "string" || raw.length > maxClientMessageLength(this.limits)) {
+      return send(ws, { type: "error", code: "invalid_message" });
+    }
+    let data: unknown;
+    try {
+      data = JSON.parse(raw);
+    } catch {
+      return send(ws, { type: "error", code: "invalid_message" });
+    }
+    const parsed = v.safeParse(clientMessageSchema(this.limits), data);
+    if (!parsed.success) {
+      return send(ws, { type: "error", code: "invalid_message", ...clientIdOf(data) });
+    }
+    const message: ClientMessage = parsed.output;
+    switch (message.type) {
+      case "comment.post":
+        return this.postComment(ws, participantId, message);
+      default:
+        // comment.delete・like.set は MVP ステップ 6 で実装する
+        return send(ws, { type: "error", code: "invalid_message" });
+    }
+  }
+
+  override async webSocketClose(ws: WebSocket, code: number, reason: string): Promise<void> {
+    try {
+      ws.close(code, reason);
+    } catch {
+      // 1005・1006 など送り返せないコードや、すでに閉じている場合
+    }
+  }
+
+  /** イベントが作成済みで、削除されていないか */
+  private isActive(): boolean {
+    const row = this.ctx.storage.sql
+      .exec<{ deleted_at: number | null }>("SELECT deleted_at FROM event")
+      .toArray()[0];
+    return row !== undefined && row.deleted_at === null;
+  }
+
+  /**
+   * 接続直後に送るメッセージ。`?since=` の seq 以降の差分が手元に残っていればそれだけを、
+   * なければ snapshot を送る。
+   */
+  private syncMessages(viewer: string, since: number | null): ServerMessage[] {
+    if (since !== null && since <= this.seq) {
+      const sql = this.ctx.storage.sql;
+      const oldest = sql
+        .exec<{ seq: number | null }>("SELECT MIN(seq) AS seq FROM updates")
+        .one().seq;
+      if (since === this.seq || (oldest !== null && since >= oldest - 1)) {
+        const updates = sql
+          .exec<{ seq: number; type: UpdateType; comment_id: string }>(
+            "SELECT seq, type, comment_id FROM updates WHERE seq > ? ORDER BY seq",
+            since,
+          )
+          .toArray();
+        const comments = new Map(
+          sql
+            .exec<CommentRow>(
+              `${COMMENT_SELECT} AND c.id IN (SELECT comment_id FROM updates WHERE seq > ?2 AND type = 'comment.added')`,
+              viewer,
+              since,
+            )
+            .toArray()
+            .map((row) => [row.id, toComment(row, viewer)]),
+        );
+        return updates.flatMap((u): ServerMessage[] => {
+          if (u.type === "comment.removed") {
+            return [{ type: "comment.removed", seq: u.seq, commentId: u.comment_id }];
+          }
+          // その後に非表示・削除されたコメントは本文を送らない
+          const comment = comments.get(u.comment_id);
+          return comment ? [{ type: "comment.added", seq: u.seq, comment }] : [];
+        });
+      }
+    }
+    return [this.snapshot(viewer)];
+  }
+
+  private snapshot(viewer: string): ServerMessage {
+    const found = this.readEvent();
+    if (!found) throw new Error("event not found");
+    const comments = this.ctx.storage.sql
+      .exec<CommentRow>(`${COMMENT_SELECT} ORDER BY c.created_at, c.rowid`, viewer)
+      .toArray()
+      .map((row) => toComment(row, viewer));
+    return { type: "snapshot", seq: this.seq, ...found, comments };
+  }
+
+  private postComment(
+    ws: WebSocket,
+    author: string,
+    { talkId, body, clientId }: Extract<ClientMessage, { type: "comment.post" }>,
+  ): void {
+    const sql = this.ctx.storage.sql;
+    const now = Date.now();
+    const rejected = this.checkPost(author, talkId, clientId, now);
+    if (rejected) {
+      send(ws, rejected);
+      return;
+    }
+
+    const id = randomId(10);
+    this.ctx.storage.transactionSync(() => {
+      sql.exec(
+        "INSERT INTO comments (id, talk_id, author_id, client_id, body, created_at) VALUES (?, ?, ?, ?, ?, ?)",
+        id,
+        talkId,
+        author,
+        clientId,
+        body,
+        now,
+      );
+      this.recordUpdate("comment.added", id, now);
+    });
+
+    const row: CommentRow = {
+      id,
+      talk_id: talkId,
+      author_id: author,
+      client_id: clientId,
+      body,
+      created_at: now,
+      likes: 0,
+      liked_by_me: 0,
+    };
+    this.broadcast((viewer) => ({
+      type: "comment.added",
+      seq: this.seq,
+      comment: toComment(row, viewer),
+    }));
+  }
+
+  /** 投稿を受け付けられるか。受け付けないときは、投稿者に返すメッセージ */
+  private checkPost(
+    author: string,
+    talkId: string,
+    clientId: string,
+    now: number,
+  ): ServerMessage | null {
+    const sql = this.ctx.storage.sql;
+    const fail = (code: ErrorCode): ServerMessage => ({ type: "error", code, clientId });
+
+    const event = sql
+      .exec<{ comments_open: number; deleted_at: number | null }>(
+        "SELECT comments_open, deleted_at FROM event",
+      )
+      .toArray()[0];
+    if (!event || event.deleted_at !== null) return fail("not_found");
+    if (event.comments_open !== 1) return fail("comments_closed");
+
+    // 再送された投稿はすでに登録済み。受け付けたことだけを伝える
+    const existing = sql
+      .exec<{ id: string }>(
+        "SELECT id FROM comments WHERE author_id = ? AND client_id = ?",
+        author,
+        clientId,
+      )
+      .toArray()[0];
+    if (existing) return { type: "comment.accepted", clientId, commentId: existing.id };
+
+    if (sql.exec("SELECT 1 FROM talks WHERE id = ?", talkId).toArray().length === 0) {
+      return fail("not_found");
+    }
+
+    const recent = sql
+      .exec<{ count: number }>(
+        "SELECT COUNT(*) AS count FROM comments WHERE author_id = ? AND created_at > ?",
+        author,
+        now - this.limits.rateLimitWindowSec * 1000,
+      )
+      .one().count;
+    if (recent >= this.limits.rateLimitCount) return fail("rate_limited");
+    return null;
+  }
+
+  /** 差分を記録して seq を進める。古い差分は保持件数を超えた分だけ消す。トランザクション内で呼ぶ */
+  private recordUpdate(type: UpdateType, commentId: string, now: number): void {
+    const sql = this.ctx.storage.sql;
+    const seq = this.seq + 1;
+    sql.exec(
+      "INSERT INTO updates (seq, type, comment_id, created_at) VALUES (?, ?, ?, ?)",
+      seq,
+      type,
+      commentId,
+      now,
+    );
+    sql.exec("DELETE FROM updates WHERE seq <= ?", seq - UPDATES_RETAINED);
+    this.seq = seq;
+  }
+
+  /** 全接続に配信する。閲覧者ごとに内容が変わる（自分の投稿か等）ので、参加者 ID ごとに組み立てる */
+  private broadcast(build: (viewer: string) => ServerMessage): void {
+    const cache = new Map<string, string>();
+    for (const ws of this.ctx.getWebSockets()) {
+      const viewer = this.ctx.getTags(ws)[0];
+      if (!viewer) continue;
+      let json = cache.get(viewer);
+      if (json === undefined) {
+        json = JSON.stringify(build(viewer));
+        cache.set(viewer, json);
+      }
+      try {
+        ws.send(json);
+      } catch {
+        // 閉じかけの接続。再接続時に seq で補完される
+      }
+    }
+  }
+}
+
+function send(ws: WebSocket, message: ServerMessage): void {
+  try {
+    ws.send(JSON.stringify(message));
+  } catch {
+    // 閉じかけの接続
+  }
+}
+
+/** 検証に通らなかったメッセージからも、clientId が読めればエラーに添える */
+function clientIdOf(data: unknown): { clientId?: string } {
+  if (typeof data !== "object" || data === null || !("clientId" in data)) return {};
+  const { clientId } = data;
+  return typeof clientId === "string" && clientId.length <= 64 ? { clientId } : {};
 }
