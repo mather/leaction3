@@ -22,7 +22,7 @@ jobs:
       - run: pnpm typecheck
       - run: pnpm test
 
-  deploy:
+  deploy-production:
     needs: check
     runs-on: ubuntu-latest
     environment:
