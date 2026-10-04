@@ -21,7 +21,7 @@ Turnstile をローカルで試すときは、`.dev.vars` の `TURNSTILE_SECRET_
 
 ## デプロイ
 
-GitHub Actions（[`.github/workflows/ci.yml`](.github/workflows/ci.yml)）で行います。PR と main への push で `pnpm lint` / `pnpm typecheck` / `pnpm test` を実行し、通ったときだけデプロイします。
+GitHub Actions で行います。本番は [`.github/workflows/production.yml`](.github/workflows/production.yml)、プレビューは [`.github/workflows/preview.yml`](.github/workflows/preview.yml) です。どちらも `pnpm lint` / `pnpm typecheck` / `pnpm test` を実行し、通ったときだけデプロイします。
 
 | きっかけ | デプロイ先 | 内容 |
 | --- | --- | --- |
