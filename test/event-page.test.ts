@@ -5,7 +5,7 @@ import type { CreateEventResponse, GetEventResponse } from "../src/shared/api";
 import worker from "../src/worker/index";
 
 async function createEvent(name = "LT 会 #1") {
-  const res = await exports.default.fetch("http://example.com/api/events", {
+  const res = await exports.default.fetch("http://example.com/api/events/new", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({

@@ -43,7 +43,7 @@ async function request<T>(path: string, init: RequestInit): Promise<T> {
 }
 
 export function createEvent(input: CreateEventRequest): Promise<CreateEventResponse> {
-  return request("/api/events", { method: "POST", body: JSON.stringify(input) });
+  return request("/api/events/new", { method: "POST", body: JSON.stringify(input) });
 }
 
 export function getEvent(id: string): Promise<GetEventResponse> {

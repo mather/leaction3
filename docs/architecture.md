@@ -70,7 +70,7 @@ flowchart LR
 | `GET /e/:id` | 誰でも | SPA の HTML。イベント名入りの OGP を差し込む |
 | `GET /api/session` | 誰でも | 有効な参加者 Cookie があるかを返す（ないときは 401）。あれば同じ ID で出し直して有効期限を延ばす |
 | `POST /api/session` | 誰でも | Turnstile トークンを検証し、参加者 ID の Cookie を発行。有効な Cookie があれば検証せずそのまま使う |
-| `POST /api/events` | 誰でも（Turnstile 必須） | イベント作成。返り値に作成者トークンを一度だけ含める |
+| `POST /api/events/new` | 誰でも（Turnstile 必須） | イベント作成。返り値に作成者トークンを一度だけ含める |
 | `GET /api/events/:id` | 誰でも | イベント情報と発表枠 |
 | `GET /api/events/:id/ws` | 参加者 Cookie | WebSocket への切り替え |
 | `POST /api/events/:id/admin/session` | 作成者・共同管理者トークン | トークンを管理セッション Cookie に入れ替える。削除済みのイベントは作成者トークンだけ通す（復元のため） |
@@ -84,6 +84,8 @@ flowchart LR
 | `GET /api/events/:id/admin-keys` | 作成者 | 共同管理者 URL の一覧（発行日・無効化日時。トークンは含めない） |
 | `POST` / `DELETE /api/events/:id/admin-keys[/:keyId]` | 作成者 | 共同管理者 URL の発行・無効化。発行時だけトークンを返す。有効な URL は上限（初期値 20）まで |
 | `DELETE /api/events/:id`（と `POST .../restore`） | 作成者 | 論理削除と復元。復元は期限（7 日）内だけで、過ぎていれば 404 |
+
+広告・トラッカーブロッカーのフィルタリストは URL の末尾で遮断するものが多いので、`/api/events`、`/api/event`、`/track`、`/collect`、`/beacon` などで終わるパスは使わない。イベント作成を `POST /api/events` にしていたところ、EasyPrivacy の `/api/events|$ping,~third-party` を種別の限定なしで適用するブラウザ（Dia）で遮断された（#27）。
 
 作成者だけの操作を共同管理者の管理セッションで呼ぶと 403 を返す。
 
