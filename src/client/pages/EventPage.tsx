@@ -22,6 +22,7 @@ import { Sheet } from "../components/Sheet";
 import { UrlField } from "../components/UrlField";
 import { ApiError, ensureSession, getAdmin, getEvent } from "../lib/api";
 import { loadLastViewedTalk, saveLastViewedTalk } from "../lib/last-talk";
+import { useLeaveGuard } from "../lib/leave-guard";
 import { createRoom, type RoomError } from "../lib/room";
 import { xPostUrl } from "../lib/share";
 import { commentPlaceholder, pickInitialTalk, talkLabel } from "../lib/talks";
@@ -88,6 +89,11 @@ function EventView(props: { data: GetEventResponse }) {
   onCleanup(() => clearTimeout(noticeTimer));
 
   const [draft, setDraft] = createSignal("");
+  // 未送信のコメントがあるときだけ、離れる前に確認する
+  useLeaveGuard(
+    () => draft().trim() !== "",
+    "入力中のコメントは送信されていません。このページを離れますか？",
+  );
 
   const room = createRoom(
     props.data.event.id,
