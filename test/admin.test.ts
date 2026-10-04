@@ -7,39 +7,16 @@ import type {
   TalksResponse,
   UpdateEventResponse,
 } from "../src/shared/api";
-import { connect, createEvent, expectType, ORIGIN, participant } from "./helpers";
-
-function request(
-  path: string,
-  init: { method?: string; cookie?: string; origin?: string | null; body?: unknown } = {},
-) {
-  const headers: Record<string, string> = { "Content-Type": "application/json" };
-  if (init.cookie) headers.Cookie = init.cookie;
-  // 既定では同じオリジンのページから送ったものとする。null なら Origin を付けない
-  if (init.origin !== null) headers.Origin = init.origin ?? ORIGIN;
-  return exports.default.fetch(`${ORIGIN}${path}`, {
-    method: init.method ?? "GET",
-    headers,
-    body: init.body === undefined ? undefined : JSON.stringify(init.body),
-  });
-}
-
-function postAdminSession(id: string, token: string, origin?: string | null) {
-  return request(`/api/events/${id}/admin/session`, { method: "POST", body: { token }, origin });
-}
-
-/** 作成者トークンで管理セッションを作り、管理 Cookie（`adm=...`）を返す */
-async function adminCookie(id: string, token: string): Promise<string> {
-  const res = await postAdminSession(id, token);
-  expect(res.status).toBe(200);
-  return (res.headers.get("Set-Cookie") ?? "").split(";")[0] ?? "";
-}
-
-/** イベントを作り、作成者の管理 Cookie を用意する */
-async function setup() {
-  const created = await createEvent();
-  return { ...created, cookie: await adminCookie(created.id, created.ownerToken) };
-}
+import {
+  connect,
+  createEvent,
+  expectType,
+  ORIGIN,
+  participant,
+  postAdminSession,
+  request,
+  setupAdmin as setup,
+} from "./helpers";
 
 describe("POST /api/events/:id/admin/session", () => {
   it("作成者トークンを、そのイベントの API に絞った HttpOnly Cookie に入れ替える", async () => {
@@ -168,7 +145,8 @@ describe("PATCH /api/events/:id", () => {
     ["名前が空", { name: " " }],
     ["存在しない日付", { date: "2026-02-30" }],
     ["http(s) 以外の URL", { url: "javascript:alert(1)" }],
-    ["知らない項目", { commentsOpen: false }],
+    ["知らない項目", { unknown: 1 }],
+    ["受付の切り替えが真偽値でない", { commentsOpen: "no" }],
   ])("入力が不正なら 400（%s）", async (_, body) => {
     const { id, cookie } = await setup();
     const res = await request(`/api/events/${id}`, { method: "PATCH", cookie, body });

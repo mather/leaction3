@@ -103,3 +103,35 @@ export async function expectType<T extends ServerMessage["type"]>(
   expect(message.type).toBe(type);
   return message as Extract<ServerMessage, { type: T }>;
 }
+
+export function request(
+  path: string,
+  init: { method?: string; cookie?: string; origin?: string | null; body?: unknown } = {},
+) {
+  const headers: Record<string, string> = { "Content-Type": "application/json" };
+  if (init.cookie) headers.Cookie = init.cookie;
+  // 既定では同じオリジンのページから送ったものとする。null なら Origin を付けない
+  if (init.origin !== null) headers.Origin = init.origin ?? ORIGIN;
+  return exports.default.fetch(`${ORIGIN}${path}`, {
+    method: init.method ?? "GET",
+    headers,
+    body: init.body === undefined ? undefined : JSON.stringify(init.body),
+  });
+}
+
+export function postAdminSession(id: string, token: string, origin?: string | null) {
+  return request(`/api/events/${id}/admin/session`, { method: "POST", body: { token }, origin });
+}
+
+/** 作成者トークンで管理セッションを作り、管理 Cookie（`adm=...`）を返す */
+export async function adminCookie(id: string, token: string): Promise<string> {
+  const res = await postAdminSession(id, token);
+  expect(res.status).toBe(200);
+  return (res.headers.get("Set-Cookie") ?? "").split(";")[0] ?? "";
+}
+
+/** イベントを作り、作成者の管理 Cookie を用意する */
+export async function setupAdmin() {
+  const created = await createEvent();
+  return { ...created, cookie: await adminCookie(created.id, created.ownerToken) };
+}

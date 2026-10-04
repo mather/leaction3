@@ -1,6 +1,6 @@
 // HTTP API のリクエスト・レスポンス型。クライアントと Worker で共有する。
 
-import type { EventInfo, Talk, TalkId } from "./protocol";
+import type { CommentId, EventInfo, Talk, TalkId } from "./protocol";
 
 export type HealthResponse = {
   ok: true;
@@ -69,4 +69,27 @@ export type UpdateEventResponse = {
 /** 発表枠の追加・編集・削除・並べ替え。操作後の全発表枠（並び順） */
 export type TalksResponse = {
   talks: Talk[];
+};
+
+/**
+ * 管理画面のコメント一覧の 1 件。非表示のものも含む。
+ * 投稿者は参加者 ID ではなく、イベントごとに振った不透明なキー（authorKey）で表す
+ */
+export type AdminComment = {
+  id: CommentId;
+  talkId: TalkId;
+  body: string;
+  /** UNIX エポックからのミリ秒 */
+  createdAt: number;
+  likes: number;
+  hidden: boolean;
+  /** 投稿者のキー。画面には先頭 4 文字だけを出し、一括非表示の対象の指定に使う */
+  authorKey: string;
+  /** 投稿者ごと非表示にしているか（以降の投稿も非表示になる） */
+  authorHidden: boolean;
+};
+
+/** GET /api/events/:id/admin/comments とモデレーション操作の結果。新しい順 */
+export type AdminCommentsResponse = {
+  comments: AdminComment[];
 };

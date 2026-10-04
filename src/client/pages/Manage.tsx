@@ -1,7 +1,23 @@
 import { A, useParams } from "@solidjs/router";
-import { createResource, createSignal, For, Match, onCleanup, Show, Switch } from "solid-js";
+import {
+  createEffect,
+  createMemo,
+  createResource,
+  createSignal,
+  For,
+  Match,
+  on,
+  onCleanup,
+  Show,
+  Switch,
+} from "solid-js";
 import { createStore, reconcile } from "solid-js/store";
-import type { AdminRole, GetAdminResponse, UpdateEventRequest } from "../../shared/api";
+import type {
+  AdminComment,
+  AdminRole,
+  GetAdminResponse,
+  UpdateEventRequest,
+} from "../../shared/api";
 import type { EventInfo, Talk, TalkId } from "../../shared/protocol";
 import { DEFAULT_LIMITS, isValidTalk } from "../../shared/schema";
 import button from "../components/button.module.css";
@@ -13,7 +29,10 @@ import {
   createAdminSession,
   deleteTalk,
   getAdmin,
+  getAdminComments,
   reorderTalks,
+  setAuthorHidden,
+  setCommentHidden,
   updateEvent,
   updateTalk,
 } from "../lib/api";
@@ -130,12 +149,51 @@ function ManageView(props: { data: GetAdminResponse; reload: () => Promise<GetAd
       setStore("event", reconcile(latest.event));
       setTalks(latest.talks);
       setStore("commentCounts", reconcile(latest.commentCounts));
-      return true;
     } catch {
       // 読み込めなければ今の表示のまま
       return false;
     }
+    return comments() === null || (await loadComments());
   };
+
+  // コメント一覧（非表示も含む、新しい順）。コメントタブを開いたときに読み込む。null は未読み込み
+  const [comments, setComments] = createSignal<AdminComment[] | null>(null);
+  const loadComments = async (): Promise<boolean> => {
+    try {
+      setComments((await getAdminComments(eventId)).comments);
+      return true;
+    } catch {
+      return false;
+    }
+  };
+  createEffect(
+    on(tab, (t) => {
+      if (t !== "comments") return;
+      void loadComments().then((ok) => {
+        if (!ok) showToast("error", "コメントを読み込めませんでした。通信状況を確認してください");
+      });
+    }),
+  );
+
+  /** コメント一覧を書き換えるモデレーション操作。失敗時の取り消しは、その後に一覧が変わっていなければ戻す */
+  const moderate = (
+    change: (c: AdminComment) => AdminComment,
+    call: () => Promise<{ comments: AdminComment[] }>,
+    success: string,
+  ) =>
+    void save({
+      optimistic: () => {
+        const before = comments();
+        setComments((list) => list?.map(change) ?? null);
+        const after = comments();
+        return () => {
+          if (comments() === after) setComments(before);
+        };
+      },
+      call,
+      apply: (r) => setComments(r.comments),
+      success,
+    });
 
   /**
    * 操作を即時に画面へ反映してからサーバーに送る。成功したら apply でサーバーの結果を反映する。
@@ -311,7 +369,50 @@ function ManageView(props: { data: GetAdminResponse; reload: () => Promise<GetAd
               onReject={(message) => showToast("error", message)}
             />
           </Match>
-          <Match when={tab() === "comments" || tab() === "admins"}>
+          <Match when={tab() === "comments"}>
+            <CommentsTab
+              commentsOpen={store.event.commentsOpen}
+              comments={comments()}
+              talks={store.talks}
+              onRefresh={async () => {
+                if (!(await loadComments())) {
+                  showToast("error", "コメントを読み込めませんでした。通信状況を確認してください");
+                }
+              }}
+              onToggleOpen={(open) =>
+                void save({
+                  optimistic: () => {
+                    setStore("event", "commentsOpen", open);
+                    return () => {
+                      if (store.event.commentsOpen === open) {
+                        setStore("event", "commentsOpen", !open);
+                      }
+                    };
+                  },
+                  call: () => updateEvent(eventId, { commentsOpen: open }),
+                  apply: (r) => setStore("event", reconcile(r.event)),
+                  success: open ? "コメントの受付を再開しました" : "コメントの受付を停止しました",
+                })
+              }
+              onHide={(commentId, hidden) =>
+                moderate(
+                  (c) => (c.id === commentId ? { ...c, hidden } : c),
+                  () => setCommentHidden(eventId, commentId, hidden),
+                  hidden ? "非表示にしました" : "表示に戻しました",
+                )
+              }
+              onHideAuthor={(authorKey, hidden) =>
+                moderate(
+                  (c) => (c.authorKey === authorKey ? { ...c, hidden, authorHidden: hidden } : c),
+                  () => setAuthorHidden(eventId, authorKey, hidden),
+                  hidden
+                    ? "この投稿者のコメントをすべて非表示にしました"
+                    : "この投稿者の非表示を解除しました",
+                )
+              }
+            />
+          </Match>
+          <Match when={tab() === "admins"}>
             <p class={styles.placeholder}>この機能は準備中です。</p>
           </Match>
         </Switch>
@@ -604,6 +705,194 @@ function TalksTab(props: {
             }}
           >
             削除する
+          </button>
+        </div>
+      </Sheet>
+    </>
+  );
+}
+
+const timeFormat = new Intl.DateTimeFormat("ja-JP", { hour: "2-digit", minute: "2-digit" });
+
+/** 投稿者キーのうち画面に出す部分。同じ人の投稿だと分かれば足りる */
+const shortKey = (key: string) => key.slice(0, 4);
+
+function CommentsTab(props: {
+  commentsOpen: boolean;
+  /** null は読み込み中 */
+  comments: AdminComment[] | null;
+  talks: Talk[];
+  onRefresh: () => Promise<void>;
+  onToggleOpen: (open: boolean) => void;
+  onHide: (commentId: string, hidden: boolean) => void;
+  onHideAuthor: (authorKey: string, hidden: boolean) => void;
+}) {
+  // 発表で絞り込む。空文字はすべての発表
+  const [talkFilter, setTalkFilter] = createSignal("");
+  const visible = createMemo(() => {
+    const list = props.comments ?? [];
+    return talkFilter() === "" ? list : list.filter((c) => c.talkId === talkFilter());
+  });
+  const talkName = (talkId: string) => {
+    const index = props.talks.findIndex((t) => t.id === talkId);
+    const talk = props.talks[index];
+    return talk ? `${index + 1}. ${talkLabel(talk)}` : "";
+  };
+
+  const [refreshing, setRefreshing] = createSignal(false);
+  const refresh = async () => {
+    setRefreshing(true);
+    await props.onRefresh();
+    setRefreshing(false);
+  };
+
+  // 投稿者ごとの非表示は影響が大きいので確認を挟む（表示に戻すのは確認なし）
+  const [authorTarget, setAuthorTarget] = createSignal<string>();
+  const authorCount = () =>
+    (props.comments ?? []).filter((c) => c.authorKey === authorTarget()).length;
+
+  return (
+    <>
+      <div class={styles.card}>
+        <label class={styles.switchRow}>
+          <span>
+            <span class={styles.label}>コメントを受け付ける</span>
+            <span class={styles.switchNote}>
+              {props.commentsOpen
+                ? "参加者はコメントを投稿できます"
+                : "停止中です。参加者の入力欄の代わりに「コメントの受付は停止中です」と表示されます"}
+            </span>
+          </span>
+          <input
+            type="checkbox"
+            role="switch"
+            aria-checked={props.commentsOpen}
+            class={styles.switch}
+            checked={props.commentsOpen}
+            onChange={(e) => props.onToggleOpen(e.currentTarget.checked)}
+          />
+        </label>
+      </div>
+
+      <div class={styles.listHeader}>
+        <select
+          class={styles.select}
+          aria-label="発表で絞り込む"
+          value={talkFilter()}
+          onChange={(e) => setTalkFilter(e.currentTarget.value)}
+        >
+          <option value="">すべての発表</option>
+          <For each={props.talks}>
+            {(t, i) => (
+              <option value={t.id}>
+                {i() + 1}. {talkLabel(t)}
+              </option>
+            )}
+          </For>
+        </select>
+        <button
+          type="button"
+          class={button.secondary}
+          disabled={refreshing()}
+          onClick={() => void refresh()}
+        >
+          {refreshing() ? "更新中…" : "最新にする"}
+        </button>
+      </div>
+
+      <Show
+        when={props.comments !== null}
+        fallback={<p class={styles.placeholder}>コメントを読み込んでいます…</p>}
+      >
+        <Show
+          when={visible().length > 0}
+          fallback={<p class={styles.placeholder}>まだコメントはありません。</p>}
+        >
+          <ol class={styles.comments}>
+            <For each={visible()}>
+              {(c) => (
+                <li class={styles.comment} data-hidden={c.hidden ? "" : undefined}>
+                  <p class={styles.commentMeta}>
+                    <span class={styles.commentTalk}>{talkName(c.talkId)}</span>
+                    <time dateTime={new Date(c.createdAt).toISOString()}>
+                      {timeFormat.format(c.createdAt)}
+                    </time>
+                    <span class={styles.author} title="投稿者 ID の先頭 4 文字">
+                      ID {shortKey(c.authorKey)}
+                    </span>
+                    <span class={styles.likes} title="いいね">
+                      <Icon name="heart" size={14} />
+                      {c.likes}
+                    </span>
+                  </p>
+                  <Show when={c.hidden}>
+                    <p class={styles.hiddenBadge}>
+                      {c.authorHidden ? "非表示（投稿者ごと）" : "非表示"}
+                    </p>
+                  </Show>
+                  {/* プレーンテキストとして表示する（リンク化もしない） */}
+                  <p class={styles.commentBody}>{c.body}</p>
+                  <div class={styles.commentActions}>
+                    <button
+                      type="button"
+                      class={styles.textButton}
+                      onClick={() => props.onHide(c.id, !c.hidden)}
+                    >
+                      {c.hidden ? "表示に戻す" : "非表示にする"}
+                    </button>
+                    <Show
+                      when={c.authorHidden}
+                      fallback={
+                        <button
+                          type="button"
+                          class={styles.textButton}
+                          data-danger
+                          onClick={() => setAuthorTarget(c.authorKey)}
+                        >
+                          この投稿者をすべて非表示
+                        </button>
+                      }
+                    >
+                      <button
+                        type="button"
+                        class={styles.textButton}
+                        onClick={() => props.onHideAuthor(c.authorKey, false)}
+                      >
+                        この投稿者の非表示を解除
+                      </button>
+                    </Show>
+                  </div>
+                </li>
+              )}
+            </For>
+          </ol>
+        </Show>
+      </Show>
+
+      <Sheet
+        open={authorTarget() !== undefined}
+        onClose={() => setAuthorTarget(undefined)}
+        title="この投稿者をすべて非表示にしますか？"
+      >
+        <p class={styles.deleteNote}>
+          投稿者 ID {shortKey(authorTarget() ?? "")} のコメント {authorCount()}{" "}
+          件をすべて非表示にします。これからの投稿も参加者には表示されません。
+        </p>
+        <p class={styles.sheetNote}>あとから「この投稿者の非表示を解除」で戻せます。</p>
+        <div class={styles.sheetActions}>
+          <button type="button" class={button.secondary} onClick={() => setAuthorTarget(undefined)}>
+            キャンセル
+          </button>
+          <button
+            type="button"
+            class={button.danger}
+            onClick={() => {
+              const key = authorTarget();
+              setAuthorTarget(undefined);
+              if (key) props.onHideAuthor(key, true);
+            }}
+          >
+            非表示にする
           </button>
         </div>
       </Sheet>

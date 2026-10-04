@@ -70,7 +70,7 @@ export function applyServerMessage(state: RoomState, message: ServerMessage): Ro
       const { comment } = message;
       const added = state.comments.some((c) => c.id === comment.id)
         ? next
-        : { ...next, comments: [...state.comments, comment] };
+        : { ...next, comments: insertByTime(state.comments, comment) };
       return comment.clientId ? withoutPending(added, comment.clientId) : added;
     }
     case "comment.removed":
@@ -105,6 +105,16 @@ export function addPending(state: RoomState, pending: PendingComment): RoomState
 function withoutPending(state: RoomState, clientId: string): RoomState {
   if (!state.pending.some((p) => p.clientId === clientId)) return state;
   return { ...state, pending: state.pending.filter((p) => p.clientId !== clientId) };
+}
+
+/**
+ * 投稿時刻の順を保って差し込む。新着はたいてい末尾だが、
+ * 非表示から表示に戻されたコメントは元の位置に戻す
+ */
+function insertByTime(comments: Comment[], comment: Comment): Comment[] {
+  const index = comments.findIndex((c) => c.createdAt > comment.createdAt);
+  if (index === -1) return [...comments, comment];
+  return [...comments.slice(0, index), comment, ...comments.slice(index)];
 }
 
 function updateComment(

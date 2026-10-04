@@ -53,6 +53,7 @@ flowchart LR
 | `likes` | `comment_id`, `voter_id`, `created_at` | 主キーを `(comment_id, voter_id)` にして二重いいねを防ぐ |
 | `admin_keys` | `id`, `role`（owner / manager）, `token_hash`, `created_at`, `revoked_at` | owner は 1 件、manager は複数 |
 | `hidden_authors` | `author_id`, `created_at` | 一括非表示した投稿者。以降の投稿も非表示にする |
+| `author_keys` | `author_id`, `key`, `created_at` | 管理画面で投稿者を表すキー（乱数）。参加者 ID は管理者にも見せない |
 
 - 非表示は削除ではなくフラグにし、管理画面から「表示に戻す」ができるようにする
 - 発表枠を削除したときは、その発表のコメントといいねも同じトランザクションで消す
@@ -73,11 +74,12 @@ flowchart LR
 | `GET /api/events/:id/ws` | 参加者 Cookie | WebSocket への切り替え |
 | `POST /api/events/:id/admin/session` | 作成者・共同管理者トークン | トークンを管理セッション Cookie に入れ替える |
 | `GET /api/events/:id/admin` | 管理 | 権限・イベント情報・発表枠・発表ごとのコメント数（管理画面の表示と、メニューに「イベントを管理する」を出すかの判定） |
-| `PATCH /api/events/:id` | 管理 | イベント情報の更新（変更した項目だけ） |
+| `PATCH /api/events/:id` | 管理 | イベント情報の更新（変更した項目だけ）。コメント受付の一時停止（`commentsOpen`）もここで切り替える |
 | `POST` / `PATCH` / `DELETE /api/events/:id/talks[/:talkId]` | 管理 | 発表枠の追加・編集・削除。最後の 1 枠は削除できない（409） |
 | `PUT /api/events/:id/talks/order` | 管理 | 並び順（今あるすべての ID の配列。過不足があれば 409） |
+| `GET /api/events/:id/admin/comments` | 管理 | コメント一覧（非表示も含む、新しい順）。投稿者は `author_keys` のキーで表す |
 | `POST /api/events/:id/comments/:cid/hide`（と `unhide`） | 管理 | コメントの非表示・再表示 |
-| `POST /api/events/:id/authors/:aid/hide` | 管理 | 投稿者単位の一括非表示 |
+| `POST /api/events/:id/authors/:aid/hide`（と `unhide`） | 管理 | 投稿者単位の一括非表示と、その解除（`:aid` は投稿者のキー）。解除するとその投稿者の非表示のコメントをすべて表示に戻す |
 | `POST` / `DELETE /api/events/:id/admin-keys[/:keyId]` | 作成者 | 共同管理者 URL の発行・無効化 |
 | `DELETE /api/events/:id`（と `POST .../restore`） | 作成者 | 論理削除と復元 |
 
@@ -98,7 +100,9 @@ flowchart LR
 - 自分の投稿には `clientId` を付けて返す（`snapshot` 内も）。クライアントは受け付けの知らせがない投稿を再接続後に送り直し、EventRoom は `(author_id, client_id)` の一意制約で二重登録を防ぐ
 - WebSocket Hibernation API を使い、発言がない間は DO を休止させて実行時間の課金を止める
 - 死活確認はクライアントが `ping` を送り、`setWebSocketAutoResponse` で DO を起こさずに `pong` を返す
-- 非表示にしたコメントは参加者には `comment.removed` として配信し、本文を送らない
+- 非表示にしたコメントは参加者には `comment.removed` として配信し、本文を送らない。表示に戻したコメントは `comment.added` として配信し、クライアントは投稿時刻の位置に差し込む
+- 投稿者ごと非表示にした人の投稿は非表示のまま登録し、誰にも配信しない。本人には `comment.accepted` だけを返す（送り直しを止めるため）
+- モデレーション操作は HTTP の応答で最新のコメント一覧を返す。管理画面のコメント一覧は WebSocket では更新せず、開いたときと「最新にする」で読み込む
 - `like.changed` の `likedByMe` は、いいねを付け外した本人の接続にだけ付ける（他の人の状態は変わらないため）。状態が変わらない `like.set`（いいね済みへのいいね等）は何も配信しない
 - 自分のコメントへのいいねは `invalid_message`、他人のコメントの削除は `not_found` で拒否する。自分のコメントの削除は非表示と違い、コメントといいねを実際に消す
 - 送り直す差分は 1 件につき必ず 1 通にして `seq` を飛ばさない。その後に非表示・削除されたコメントの差分は `comment.removed` として送る

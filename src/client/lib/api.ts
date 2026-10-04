@@ -1,5 +1,6 @@
 import type {
   AddTalkRequest,
+  AdminCommentsResponse,
   AdminSessionResponse,
   CreateAdminSessionRequest,
   CreateEventRequest,
@@ -105,4 +106,32 @@ export function deleteTalk(id: string, talkId: string): Promise<TalksResponse> {
 export function reorderTalks(id: string, ids: string[]): Promise<TalksResponse> {
   const input: ReorderTalksRequest = { ids };
   return request(`${eventPath(id)}/talks/order`, { method: "PUT", body: JSON.stringify(input) });
+}
+
+// モデレーション。結果として最新のコメント一覧（非表示も含む、新しい順）が返る
+
+export function getAdminComments(id: string): Promise<AdminCommentsResponse> {
+  return request(`${eventPath(id)}/admin/comments`, { method: "GET" });
+}
+
+export function setCommentHidden(
+  id: string,
+  commentId: string,
+  hidden: boolean,
+): Promise<AdminCommentsResponse> {
+  const action = hidden ? "hide" : "unhide";
+  return request(`${eventPath(id)}/comments/${encodeURIComponent(commentId)}/${action}`, {
+    method: "POST",
+  });
+}
+
+export function setAuthorHidden(
+  id: string,
+  authorKey: string,
+  hidden: boolean,
+): Promise<AdminCommentsResponse> {
+  const action = hidden ? "hide" : "unhide";
+  return request(`${eventPath(id)}/authors/${encodeURIComponent(authorKey)}/${action}`, {
+    method: "POST",
+  });
 }

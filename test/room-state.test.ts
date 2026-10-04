@@ -65,6 +65,22 @@ describe("applyServerMessage", () => {
     ]);
   });
 
+  it("表示に戻されたコメントは投稿時刻の位置に差し込む", () => {
+    const base = apply(initialRoomState, {
+      type: "snapshot",
+      seq: 1,
+      event,
+      talks,
+      comments: [comment("c1", { createdAt: 10 }), comment("c3", { createdAt: 30 })],
+    });
+    const state = apply(base, {
+      type: "comment.added",
+      seq: 2,
+      comment: comment("c2", { createdAt: 20 }),
+    });
+    expect(state.comments.map((c) => c.id)).toEqual(["c1", "c2", "c3"]);
+  });
+
   it("talks.updated で発表枠を置き換え、削除された発表のコメントを取り除く", () => {
     const other = { id: "talk0002", speaker: "佐藤", title: "" };
     const state = apply(
