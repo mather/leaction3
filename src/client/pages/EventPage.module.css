@@ -291,7 +291,10 @@
 }
 
 .card {
-  padding: 10px 14px;
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  padding: 10px 6px 10px 14px;
   border: 1px solid var(--line);
   border-radius: var(--radius-card);
   background: var(--surface);
@@ -299,6 +302,11 @@
 
 .card[data-pending] {
   opacity: 0.6;
+}
+
+.cardMain {
+  flex: 1;
+  min-width: 0;
 }
 
 .body {
@@ -327,6 +335,86 @@
   background: var(--accent-soft);
   color: var(--accent);
   font-weight: 700;
+}
+
+.deleteButton {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  margin-left: auto;
+  /* 小さな文字でも押しやすいよう、見た目より広く当たり判定を取る */
+  margin-block: -8px;
+  padding: 8px;
+  border: 0;
+  background: none;
+  color: var(--text-sub);
+  font: inherit;
+  cursor: pointer;
+}
+
+.deleteButton:not(:disabled):hover {
+  color: var(--warn);
+}
+
+.deleteButton:disabled {
+  cursor: not-allowed;
+  opacity: 0.45;
+}
+
+.likeButton {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  min-width: var(--tap-min);
+  min-height: var(--tap-min);
+  padding: 2px 4px;
+  border: 0;
+  border-radius: var(--radius-control);
+  background: none;
+  color: var(--text-sub);
+  font: inherit;
+  line-height: 1.2;
+  cursor: pointer;
+}
+
+.likeButton:not(:disabled):hover {
+  background: var(--surface-sub);
+}
+
+.likeButton[data-liked] {
+  color: var(--like);
+}
+
+.likeButton:disabled {
+  cursor: default;
+  opacity: 0.45;
+}
+
+.likeCount {
+  font-size: 0.75rem;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+}
+
+.deletePreview {
+  margin: 0;
+  padding: 10px 12px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-control);
+  background: var(--surface-sub);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  /* 長いコメントでもボタンが画面外に出ないように */
+  max-height: 30vh;
+  overflow-y: auto;
+}
+
+.deleteNote {
+  margin: 0;
+  color: var(--warn);
+  font-size: 0.875rem;
 }
 
 .newPill {

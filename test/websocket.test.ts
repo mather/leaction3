@@ -270,6 +270,144 @@ describe("comment.post", () => {
   });
 });
 
+/** 投稿者 author と、もう 1 人の参加者 other が接続し、author が 1 件投稿した状態 */
+async function withComment() {
+  const { id, talkIds } = await createEvent();
+  const [talk] = talkIds as [string];
+  const authorCookie = await participant();
+  const otherCookie = await participant();
+  const author = await connect(id, authorCookie);
+  const other = await connect(id, otherCookie);
+  await expectType(author, "snapshot");
+  await expectType(other, "snapshot");
+  author.post(talk, "いいねしてね");
+  const { comment } = await expectType(author, "comment.added");
+  await expectType(other, "comment.added");
+  return { id, talk, commentId: comment.id, author, authorCookie, other, otherCookie };
+}
+
+describe("like.set", () => {
+  it("いいねの付け外しを全接続に配信し、likedByMe は本人にだけ付ける", async () => {
+    const { commentId, author, other } = await withComment();
+
+    other.send({ type: "like.set", commentId, liked: true, voterId: "x" });
+    expect(await expectType(other, "like.changed")).toEqual({
+      type: "like.changed",
+      seq: 2,
+      commentId,
+      likes: 1,
+      likedByMe: true,
+    });
+    expect(await expectType(author, "like.changed")).toEqual({
+      type: "like.changed",
+      seq: 2,
+      commentId,
+      likes: 1,
+    });
+
+    other.send({ type: "like.set", commentId, liked: false });
+    expect(await expectType(other, "like.changed")).toMatchObject({ likes: 0, likedByMe: false });
+    expect(await expectType(author, "like.changed")).toMatchObject({ seq: 3, likes: 0 });
+  });
+
+  it("二重いいね・いいねしていないものの取り消しは何も配信しない", async () => {
+    const { talk, commentId, author, other } = await withComment();
+    other.send({ type: "like.set", commentId, liked: false });
+    other.send({ type: "like.set", commentId, liked: true });
+    other.send({ type: "like.set", commentId, liked: true });
+    expect(await expectType(other, "like.changed")).toMatchObject({ seq: 2, likes: 1 });
+    // 次に届くのが新しい投稿なら、2 回目のいいねでは何も配信されていない
+    author.post(talk, "次");
+    expect(await expectType(other, "comment.added")).toMatchObject({ seq: 3 });
+  });
+
+  it("snapshot にいいね数と自分がいいねしたかを含める", async () => {
+    const { id, commentId, other, authorCookie, otherCookie } = await withComment();
+    other.send({ type: "like.set", commentId, liked: true });
+    await expectType(other, "like.changed");
+    const mine = await expectType(await connect(id, otherCookie), "snapshot");
+    expect(mine.comments[0]).toMatchObject({ likes: 1, likedByMe: true });
+    const author = await expectType(await connect(id, authorCookie), "snapshot");
+    expect(author.comments[0]).toMatchObject({ likes: 1, likedByMe: false });
+  });
+
+  it("自分のコメントにはいいねできない", async () => {
+    const { commentId, author } = await withComment();
+    author.send({ type: "like.set", commentId, liked: true });
+    expect(await author.next()).toEqual({ type: "error", code: "invalid_message", commentId });
+  });
+
+  it("存在しない・非表示のコメントには not_found", async () => {
+    const { id, commentId, other } = await withComment();
+    other.send({ type: "like.set", commentId: "nothere1", liked: true });
+    expect(await other.next()).toEqual({
+      type: "error",
+      code: "not_found",
+      commentId: "nothere1",
+    });
+    await runInDurableObject(env.EVENT_ROOM.getByName(id), (_, state) => {
+      state.storage.sql.exec("UPDATE comments SET hidden = 1");
+    });
+    other.send({ type: "like.set", commentId, liked: true });
+    expect(await other.next()).toEqual({ type: "error", code: "not_found", commentId });
+  });
+
+  it("再接続時は送り直す時点のいいね数を送る", async () => {
+    const { id, commentId, other, otherCookie } = await withComment();
+    other.send({ type: "like.set", commentId, liked: true });
+    await expectType(other, "like.changed");
+    other.send({ type: "like.set", commentId, liked: false });
+    await expectType(other, "like.changed");
+
+    const b = await connect(id, otherCookie, 1);
+    for (const seq of [2, 3]) {
+      expect(await expectType(b, "like.changed")).toEqual({
+        type: "like.changed",
+        seq,
+        commentId,
+        likes: 0,
+        likedByMe: false,
+      });
+    }
+  });
+});
+
+describe("comment.delete", () => {
+  it("自分のコメントを消し、いいねも消して comment.removed を配信する", async () => {
+    const { id, commentId, author, other, otherCookie } = await withComment();
+    other.send({ type: "like.set", commentId, liked: true });
+    await expectType(other, "like.changed");
+    await expectType(author, "like.changed");
+
+    author.send({ type: "comment.delete", commentId });
+    for (const client of [author, other]) {
+      expect(await client.next()).toEqual({ type: "comment.removed", seq: 3, commentId });
+    }
+    const snapshot = await expectType(await connect(id, otherCookie), "snapshot");
+    expect(snapshot.comments).toEqual([]);
+    await runInDurableObject(env.EVENT_ROOM.getByName(id), (_, state) => {
+      expect(state.storage.sql.exec("SELECT * FROM likes").toArray()).toEqual([]);
+    });
+  });
+
+  it("他人のコメントは消せない", async () => {
+    const { id, commentId, other, otherCookie } = await withComment();
+    other.send({ type: "comment.delete", commentId, authorId: "x" });
+    expect(await other.next()).toEqual({ type: "error", code: "not_found", commentId });
+    const snapshot = await expectType(await connect(id, otherCookie), "snapshot");
+    expect(snapshot.comments).toHaveLength(1);
+  });
+
+  it("再接続時、その間に消されたコメントは本文を送らない", async () => {
+    const { id, commentId, author, otherCookie } = await withComment();
+    author.send({ type: "comment.delete", commentId });
+    await expectType(author, "comment.removed");
+    const b = await connect(id, otherCookie, 0);
+    expect(await b.next()).toEqual({ type: "comment.removed", seq: 1, commentId });
+    expect(await b.next()).toEqual({ type: "comment.removed", seq: 2, commentId });
+  });
+});
+
 describe("再接続（?since=）", () => {
   async function setup(count: number) {
     const { id, talkIds } = await createEvent();
@@ -302,12 +440,13 @@ describe("再接続（?since=）", () => {
     expect(await expectType(b, "comment.added")).toMatchObject({ seq: 3 });
   });
 
-  it("その後に非表示になったコメントは送り直さない", async () => {
+  it("その後に非表示になったコメントは本文を送らず、seq を飛ばさずに comment.removed を送る", async () => {
     const { id, cookie } = await setup(2);
     await runInDurableObject(env.EVENT_ROOM.getByName(id), (_, state) => {
       state.storage.sql.exec("UPDATE comments SET hidden = 1 WHERE body = '1 件目'");
     });
     const b = await connect(id, cookie, 0);
+    expect(await expectType(b, "comment.removed")).toMatchObject({ seq: 1 });
     expect((await expectType(b, "comment.added")).comment.body).toBe("2 件目");
     const snapshot = await expectType(await connect(id, cookie), "snapshot");
     expect(snapshot.comments.map((c) => c.body)).toEqual(["2 件目"]);

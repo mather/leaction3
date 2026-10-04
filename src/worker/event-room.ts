@@ -89,7 +89,7 @@ export const PARTICIPANT_HEADER = "X-Participant-Id";
 /** 再接続時の補完に使う差分の保持件数。これより古い seq からの再接続には snapshot を送る */
 const UPDATES_RETAINED = 1000;
 
-type UpdateType = "comment.added" | "comment.removed";
+type UpdateType = "comment.added" | "comment.removed" | "like.changed";
 
 type CommentRow = {
   id: string;
@@ -293,9 +293,10 @@ export class EventRoom extends DurableObject<Env> {
     switch (message.type) {
       case "comment.post":
         return this.postComment(ws, participantId, message);
-      default:
-        // comment.delete・like.set は MVP ステップ 6 で実装する
-        return send(ws, { type: "error", code: "invalid_message" });
+      case "comment.delete":
+        return this.deleteComment(ws, participantId, message.commentId);
+      case "like.set":
+        return this.setLike(ws, participantId, message);
     }
   }
 
@@ -335,20 +336,29 @@ export class EventRoom extends DurableObject<Env> {
         const comments = new Map(
           sql
             .exec<CommentRow>(
-              `${COMMENT_SELECT} AND c.id IN (SELECT comment_id FROM updates WHERE seq > ?2 AND type = 'comment.added')`,
+              `${COMMENT_SELECT} AND c.id IN (SELECT comment_id FROM updates WHERE seq > ?2 AND type != 'comment.removed')`,
               viewer,
               since,
             )
             .toArray()
             .map((row) => [row.id, toComment(row, viewer)]),
         );
-        return updates.flatMap((u): ServerMessage[] => {
-          if (u.type === "comment.removed") {
-            return [{ type: "comment.removed", seq: u.seq, commentId: u.comment_id }];
-          }
-          // その後に非表示・削除されたコメントは本文を送らない
+        // seq が飛ぶとクライアントは取りこぼしとみなして接続し直すので、差分 1 件につき必ず 1 通送る
+        return updates.map((u): ServerMessage => {
           const comment = comments.get(u.comment_id);
-          return comment ? [{ type: "comment.added", seq: u.seq, comment }] : [];
+          // その後に非表示・削除されたコメントは本文を送らず、消えたことだけを伝える
+          if (u.type === "comment.removed" || !comment) {
+            return { type: "comment.removed", seq: u.seq, commentId: u.comment_id };
+          }
+          if (u.type === "comment.added") return { type: "comment.added", seq: u.seq, comment };
+          // いいね数は送り直す時点の値。同じコメントの差分が続いても結果は変わらない
+          return {
+            type: "like.changed",
+            seq: u.seq,
+            commentId: comment.id,
+            likes: comment.likes,
+            likedByMe: comment.likedByMe,
+          };
         });
       }
     }
@@ -406,6 +416,85 @@ export class EventRoom extends DurableObject<Env> {
       type: "comment.added",
       seq: this.seq,
       comment: toComment(row, viewer),
+    }));
+  }
+
+  /** 自分のコメントを削除する。いいねも一緒に消す。他人のコメントは見つからない扱いにする */
+  private deleteComment(ws: WebSocket, author: string, commentId: string): void {
+    const sql = this.ctx.storage.sql;
+    const own =
+      this.isActive() &&
+      sql.exec("SELECT 1 FROM comments WHERE id = ? AND author_id = ?", commentId, author).toArray()
+        .length > 0;
+    if (!own) {
+      send(ws, { type: "error", code: "not_found", commentId });
+      return;
+    }
+    this.ctx.storage.transactionSync(() => {
+      sql.exec("DELETE FROM likes WHERE comment_id = ?", commentId);
+      sql.exec("DELETE FROM comments WHERE id = ?", commentId);
+      this.recordUpdate("comment.removed", commentId, Date.now());
+    });
+    this.broadcast(() => ({ type: "comment.removed", seq: this.seq, commentId }));
+  }
+
+  /**
+   * いいねの付け外し。投票者は接続の参加者 ID で、1 人 1 回は likes の主キーで守る。
+   * 自分のコメントにはいいねできない。状態が変わらなければ何も配信しない。
+   */
+  private setLike(
+    ws: WebSocket,
+    voter: string,
+    { commentId, liked }: Extract<ClientMessage, { type: "like.set" }>,
+  ): void {
+    const sql = this.ctx.storage.sql;
+    const comment = this.isActive()
+      ? sql
+          .exec<{ author_id: string }>(
+            "SELECT author_id FROM comments WHERE id = ? AND hidden = 0",
+            commentId,
+          )
+          .toArray()[0]
+      : undefined;
+    if (!comment) {
+      send(ws, { type: "error", code: "not_found", commentId });
+      return;
+    }
+    if (comment.author_id === voter) {
+      send(ws, { type: "error", code: "invalid_message", commentId });
+      return;
+    }
+
+    const now = Date.now();
+    const changed = this.ctx.storage.transactionSync(() => {
+      const cursor = liked
+        ? sql.exec(
+            "INSERT OR IGNORE INTO likes (comment_id, voter_id, created_at) VALUES (?, ?, ?)",
+            commentId,
+            voter,
+            now,
+          )
+        : sql.exec("DELETE FROM likes WHERE comment_id = ? AND voter_id = ?", commentId, voter);
+      cursor.toArray();
+      if (cursor.rowsWritten === 0) return false;
+      this.recordUpdate("like.changed", commentId, now);
+      return true;
+    });
+    if (!changed) return;
+
+    const likes = sql
+      .exec<{ count: number }>(
+        "SELECT COUNT(*) AS count FROM likes WHERE comment_id = ?",
+        commentId,
+      )
+      .one().count;
+    // 他の人の「いいね済み」は変わらないので、投票者本人の接続にだけ likedByMe を付ける
+    this.broadcast((viewer) => ({
+      type: "like.changed",
+      seq: this.seq,
+      commentId,
+      likes,
+      ...(viewer === voter ? { likedByMe: liked } : {}),
     }));
   }
 

@@ -38,6 +38,16 @@ const PATHS = {
   ),
   arrowDown: () => <path d="M12 5v14M6 13l6 6 6-6" />,
   comment: () => <path d="M4 5h16v11H9l-5 4z" />,
+  heart: () => (
+    <path d="M12 20s-7.5-4.6-7.5-10.2A4.3 4.3 0 0 1 12 7.4a4.3 4.3 0 0 1 7.5 2.4C19.5 15.4 12 20 12 20z" />
+  ),
+  trash: () => (
+    <>
+      <path d="M4 7h16" />
+      <path d="M9.5 7V4.5h5V7" />
+      <path d="M6 7l1 13h10l1-13" />
+    </>
+  ),
   alert: () => (
     <>
       <path d="M12 3l9.5 17h-19z" />
@@ -48,13 +58,14 @@ const PATHS = {
 
 export type IconName = keyof typeof PATHS;
 
-export function Icon(props: { name: IconName; size?: number }) {
+/** filled は塗りつぶし（いいね済みなど） */
+export function Icon(props: { name: IconName; size?: number; filled?: boolean }) {
   return (
     <svg
       width={props.size ?? 20}
       height={props.size ?? 20}
       viewBox="0 0 24 24"
-      fill="none"
+      fill={props.filled ? "currentColor" : "none"}
       stroke="currentColor"
       stroke-width="2"
       stroke-linecap="round"
