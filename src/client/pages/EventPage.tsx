@@ -12,16 +12,18 @@ import {
   Switch,
 } from "solid-js";
 import type { GetEventResponse } from "../../shared/api";
-import type { Comment, ErrorCode, TalkId } from "../../shared/protocol";
+import type { Comment, ErrorCode, EventInfo, TalkId } from "../../shared/protocol";
 import { commentLength, DEFAULT_LIMITS } from "../../shared/schema";
 import button from "../components/button.module.css";
 import { CommentBody } from "../components/CommentBody";
 import { Icon } from "../components/Icon";
+import { QrCode } from "../components/QrCode";
 import { Sheet } from "../components/Sheet";
 import { UrlField } from "../components/UrlField";
 import { ApiError, ensureSession, getAdmin, getEvent } from "../lib/api";
 import { loadLastViewedTalk, saveLastViewedTalk } from "../lib/last-talk";
 import { createRoom, type RoomError } from "../lib/room";
+import { xPostUrl } from "../lib/share";
 import { commentPlaceholder, pickInitialTalk, talkLabel } from "../lib/talks";
 import { eventUrl } from "../lib/urls";
 import styles from "./EventPage.module.css";
@@ -448,7 +450,7 @@ function EventView(props: { data: GetEventResponse }) {
         </Sheet>
 
         <Sheet open={sheet() === "share"} onClose={closeSheet} title="このイベントを共有">
-          <UrlField label="イベントページの URL" url={eventUrl(event().id)} />
+          <ShareContent event={event()} />
         </Sheet>
 
         <Sheet open={sheet() === "menu"} onClose={closeSheet} title="メニュー">
@@ -508,6 +510,46 @@ function EventView(props: { data: GetEventResponse }) {
         </Sheet>
       </div>
     </Show>
+  );
+}
+
+/** 共有シートの中身。会場で映して読み取れるよう QR を大きめに出す */
+function ShareContent(props: { event: EventInfo }) {
+  const url = () => eventUrl(props.event.id);
+  // Web Share API に対応したブラウザ（主にスマホ）でだけ「他のアプリで共有」を出す
+  const canShare = typeof navigator.share === "function";
+  const share = async () => {
+    try {
+      await navigator.share({ title: props.event.name, url: url() });
+    } catch {
+      // キャンセル（AbortError）や失敗は何もしない。コピーや QR で共有できる
+    }
+  };
+
+  return (
+    <div class={styles.share}>
+      <div class={styles.qr}>
+        <QrCode value={url()} label="イベントページの QR コード" size={208} />
+      </div>
+      <UrlField label="イベントページの URL" url={url()}>
+        {/* 外へ出る導線は新しいタブで開き、イベントページを残す */}
+        <a
+          class={button.secondary}
+          href={xPostUrl({ url: url(), text: props.event.name, hashtag: props.event.hashtag })}
+          target="_blank"
+          rel="noopener"
+        >
+          X でポスト
+          <Icon name="external" size={16} />
+        </a>
+        <Show when={canShare}>
+          <button type="button" class={button.secondary} onClick={share}>
+            <Icon name="share" />
+            他のアプリで共有
+          </button>
+        </Show>
+      </UrlField>
+    </div>
   );
 }
 
