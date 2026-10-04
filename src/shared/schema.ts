@@ -111,3 +111,39 @@ export const createSessionInputSchema = v.object({
 });
 
 export type CreateSessionInput = v.InferInput<typeof createSessionInputSchema>;
+
+/** コメント本文の文字数。サロゲートペア（絵文字など）も 1 文字と数え、クライアントの表示と揃える */
+export function commentLength(body: string): number {
+  return [...body].length;
+}
+
+/** クライアントが生成する ID（clientId）。crypto.randomUUID() を想定し、形式だけを確かめる */
+export const ClientIdSchema = v.pipe(v.string(), v.regex(/^[A-Za-z0-9_-]{1,64}$/));
+
+/** WebSocket の 1 メッセージの最大長。本文の上限よりは十分大きく、巨大な入力は解析前に捨てる */
+export function maxClientMessageLength(limits: Limits): number {
+  return limits.commentMaxLength * 4 + 1024;
+}
+
+/**
+ * WebSocket でクライアントから受け取るメッセージ。protocol.ts の ClientMessage と対応する。
+ * 本文の前後の空白は落とし、空になったものは受け付けない。
+ */
+export function clientMessageSchema(limits: Limits) {
+  const id = v.pipe(v.string(), v.minLength(1), v.maxLength(64));
+  return v.variant("type", [
+    v.object({
+      type: v.literal("comment.post"),
+      talkId: id,
+      body: v.pipe(
+        v.string(),
+        v.trim(),
+        v.minLength(1),
+        v.check((s) => commentLength(s) <= limits.commentMaxLength),
+      ),
+      clientId: ClientIdSchema,
+    }),
+    v.object({ type: v.literal("comment.delete"), commentId: id }),
+    v.object({ type: v.literal("like.set"), commentId: id, liked: v.boolean() }),
+  ]);
+}

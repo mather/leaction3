@@ -22,6 +22,7 @@ import {
   randomId,
   renewParticipantId,
 } from "./auth";
+import { PARTICIPANT_HEADER } from "./event-room";
 import { eventOgp, injectOgp } from "./ogp";
 import { verifyTurnstile } from "./turnstile";
 
@@ -117,6 +118,30 @@ api.get("/events/:id", async (c) => {
   const found = indexed && (await c.env.EVENT_ROOM.getByName(id).getEvent());
   if (!found) return c.json<ErrorResponse>({ error: "not_found" }, 404);
   return c.json<GetEventResponse>(found);
+});
+
+// WebSocket への切り替え。参加者 Cookie と Origin を確かめてから EventRoom に転送する。
+// 参加者 ID はサーバーが Cookie から決め、EventRoom にはヘッダーで渡す（クライアントの値は上書きする）
+api.get("/events/:id/ws", async (c) => {
+  if (c.req.header("Upgrade")?.toLowerCase() !== "websocket") {
+    return c.json<ErrorResponse>({ error: "upgrade_required" }, 426);
+  }
+  // 別サイトのページから、参加者の Cookie を使って接続されるのを防ぐ（Cross-Site WebSocket Hijacking）
+  if (c.req.header("Origin") !== new URL(c.req.url).origin) {
+    return c.json<ErrorResponse>({ error: "forbidden_origin" }, 403);
+  }
+  const secret = cookieSecret(c.env);
+  if (!secret) return c.json<ErrorResponse>({ error: "server_misconfigured" }, 500);
+  const participantId = await getParticipantId(c, secret);
+  if (!participantId) return c.json<ErrorResponse>({ error: "no_session" }, 401);
+
+  const id = c.req.param("id");
+  if (!(await findIndexedEvent(c.env.DB, id))) {
+    return c.json<ErrorResponse>({ error: "not_found" }, 404);
+  }
+  const headers = new Headers(c.req.raw.headers);
+  headers.set(PARTICIPANT_HEADER, participantId);
+  return c.env.EVENT_ROOM.getByName(id).fetch(new Request(c.req.raw, { headers }));
 });
 
 api.all("*", (c) => c.json<ErrorResponse>({ error: "not_found" }, 404));

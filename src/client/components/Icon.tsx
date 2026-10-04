@@ -36,6 +36,8 @@ const PATHS = {
       <path d="M18 14v5a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V7a1 1 0 0 1 1-1h5" />
     </>
   ),
+  arrowDown: () => <path d="M12 5v14M6 13l6 6 6-6" />,
+  comment: () => <path d="M4 5h16v11H9l-5 4z" />,
   alert: () => (
     <>
       <path d="M12 3l9.5 17h-19z" />

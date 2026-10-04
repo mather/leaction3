@@ -30,6 +30,8 @@ export type Comment = {
   /** 接続中の参加者自身の投稿か。author_id そのものは送らない */
   mine: boolean;
   likedByMe: boolean;
+  /** 自分の投稿にだけ付く、投稿時の clientId。再接続後に未確認の投稿を照合するのに使う */
+  clientId?: string;
 };
 
 /** サーバー → クライアント */
@@ -41,18 +43,32 @@ export type ServerMessage =
       talks: Talk[];
       comments: Comment[];
     }
-  | { type: "comment.added"; seq: number; comment: Comment; clientId?: string }
+  | { type: "comment.added"; seq: number; comment: Comment }
   | { type: "comment.removed"; seq: number; commentId: CommentId }
   | { type: "like.changed"; seq: number; commentId: CommentId; likes: number; likedByMe?: boolean }
   | { type: "event.updated"; seq: number; event: EventInfo }
   | { type: "talks.updated"; seq: number; talks: Talk[] }
+  /** 再送された投稿がすでに登録済みだったとき、送った本人の接続にだけ返す（seq なし） */
+  | { type: "comment.accepted"; clientId: string; commentId: CommentId }
   | { type: "error"; code: ErrorCode; clientId?: string };
 
-/** クライアント → サーバー */
+/**
+ * クライアント → サーバー。
+ * 再接続時は接続 URL の `?since=` に最後に受け取った seq を付ける（WS_SINCE_PARAM）。
+ */
 export type ClientMessage =
-  | { type: "resume"; lastSeq: number }
   | { type: "comment.post"; talkId: TalkId; body: string; clientId: string }
   | { type: "comment.delete"; commentId: CommentId }
   | { type: "like.set"; commentId: CommentId; liked: boolean };
 
 export type ErrorCode = "rate_limited" | "comments_closed" | "invalid_message" | "not_found";
+
+/** 再接続時に最後に受け取った seq を渡すクエリパラメータ */
+export const WS_SINCE_PARAM = "since";
+
+/**
+ * 接続の死活確認。クライアントが PING を送ると、DO を起こさずに PONG が返る
+ * （setWebSocketAutoResponse）。
+ */
+export const WS_PING = "ping";
+export const WS_PONG = "pong";

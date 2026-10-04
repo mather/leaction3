@@ -1,13 +1,27 @@
 import { useParams } from "@solidjs/router";
-import { createEffect, createResource, createSignal, For, Match, Show, Switch } from "solid-js";
+import {
+  createEffect,
+  createMemo,
+  createResource,
+  createSignal,
+  For,
+  Match,
+  on,
+  onCleanup,
+  Show,
+  Switch,
+} from "solid-js";
 import type { GetEventResponse } from "../../shared/api";
-import type { TalkId } from "../../shared/protocol";
+import type { Comment, ErrorCode, TalkId } from "../../shared/protocol";
+import { commentLength, DEFAULT_LIMITS } from "../../shared/schema";
 import button from "../components/button.module.css";
+import { CommentBody } from "../components/CommentBody";
 import { Icon } from "../components/Icon";
 import { Sheet } from "../components/Sheet";
 import { UrlField } from "../components/UrlField";
 import { ApiError, ensureSession, getEvent } from "../lib/api";
 import { loadLastViewedTalk, saveLastViewedTalk } from "../lib/last-talk";
+import { createRoom, type RoomError } from "../lib/room";
 import { commentPlaceholder, pickInitialTalk, talkLabel } from "../lib/talks";
 import { eventUrl } from "../lib/urls";
 import styles from "./EventPage.module.css";
@@ -40,11 +54,54 @@ export function EventPage() {
   );
 }
 
-type SheetName = "talks" | "share" | "menu";
+type SheetName = "talks" | "share" | "menu" | "link";
+
+/** 最下部からこの距離以内なら「最下部を見ている」とみなす */
+const BOTTOM_THRESHOLD_PX = 32;
+/** 送信エラーの表示時間 */
+const NOTICE_MS = 5000;
+/** 残りがこの文字数を切ったら文字数を表示する */
+const COUNTER_FROM = 50;
+
+const ERROR_MESSAGES: Record<ErrorCode, string> = {
+  rate_limited: "少し待ってから送信してください",
+  comments_closed: "コメントの受付は停止中です",
+  not_found: "発表が見つかりません。ページを再読み込みしてください",
+  invalid_message: "送信できませんでした",
+};
+
+const timeFormat = new Intl.DateTimeFormat("ja-JP", { hour: "2-digit", minute: "2-digit" });
 
 function EventView(props: { data: GetEventResponse }) {
-  const event = () => props.data.event;
-  const talks = () => props.data.talks;
+  // 開いたときに参加者 Cookie を用意する（必要なときだけ Turnstile を 1 回通す）
+  const [session, { refetch: retrySession }] = createResource(ensureSession);
+
+  const [notice, setNotice] = createSignal<string>();
+  let noticeTimer: ReturnType<typeof setTimeout> | undefined;
+  const showNotice = (message: string) => {
+    clearTimeout(noticeTimer);
+    setNotice(message);
+    noticeTimer = setTimeout(() => setNotice(undefined), NOTICE_MS);
+  };
+  onCleanup(() => clearTimeout(noticeTimer));
+
+  const [draft, setDraft] = createSignal("");
+
+  const room = createRoom(
+    props.data.event.id,
+    () => session.state === "ready",
+    (error: RoomError) => {
+      showNotice(ERROR_MESSAGES[error.code]);
+      // 送れなかった本文は捨てず、入力欄に戻す
+      const body = error.pending?.body;
+      if (body) setDraft((d) => (d === "" ? body : `${body}\n${d}`));
+    },
+  );
+
+  // 接続後は snapshot と差分の内容を使う（管理者の変更が反映される）
+  const event = () => room.state().event ?? props.data.event;
+  const talks = () => room.state().talks ?? props.data.talks;
+  const loaded = () => room.state().seq !== null;
 
   const [talkId, setTalkId] = createSignal<TalkId | undefined>(
     pickInitialTalk(props.data.talks, {
@@ -69,18 +126,72 @@ function EventView(props: { data: GetEventResponse }) {
 
   const [sheet, setSheet] = createSignal<SheetName>();
   const closeSheet = () => setSheet(undefined);
+  const [linkUrl, setLinkUrl] = createSignal("");
+  const confirmUrl = (url: string) => {
+    setLinkUrl(url);
+    setSheet("link");
+  };
 
   const move = (delta: number) => {
     const next = talks()[index() + delta];
     if (next) setTalkId(next.id);
   };
 
-  // 開いたときに参加者 Cookie を用意する（必要なときだけ Turnstile を 1 回通す）
-  const [session, { refetch: retrySession }] = createResource(ensureSession);
+  // 全発表分のコメントを受け取り、表示する発表だけをここで絞り込む
+  const comments = createMemo(() => room.state().comments.filter((c) => c.talkId === talkId()));
+  const pending = createMemo(() => room.state().pending.filter((p) => p.talkId === talkId()));
+  const counts = createMemo(() => {
+    const map = new Map<TalkId, number>();
+    for (const c of room.state().comments) map.set(c.talkId, (map.get(c.talkId) ?? 0) + 1);
+    return map;
+  });
 
-  // コメントの送信は WebSocket（MVP ステップ 5）で行う。接続には参加者 Cookie が要る
-  const connected = () => false;
-  const [draft, setDraft] = createSignal("");
+  // 自動スクロール: 最下部を見ているときだけ新着に追従し、それ以外は新着ピルで知らせる
+  let list: HTMLElement | undefined;
+  const [atBottom, setAtBottom] = createSignal(true);
+  const [unread, setUnread] = createSignal(0);
+  const scrollToBottom = () => {
+    if (list) list.scrollTop = list.scrollHeight;
+    setAtBottom(true);
+    setUnread(0);
+  };
+  const onScroll = () => {
+    if (!list) return;
+    const bottom = list.scrollHeight - list.scrollTop - list.clientHeight <= BOTTOM_THRESHOLD_PX;
+    setAtBottom(bottom);
+    if (bottom) setUnread(0);
+  };
+  createEffect(
+    on([talkId, comments], ([id, current], prev) => {
+      // 発表を切り替えたとき・最初の表示では最下部（最新）から見せる
+      if (!prev || prev[0] !== id) return scrollToBottom();
+      const seen = new Set(prev[1].map((c) => c.id));
+      const added = current.filter((c) => !seen.has(c.id));
+      if (added.length === 0) return;
+      if (atBottom() || added.some((c) => c.mine)) return scrollToBottom();
+      setUnread((n) => n + added.length);
+    }),
+  );
+  // 自分が送ったときは、どこを見ていても最下部へ
+  createEffect(
+    on(
+      () => pending().length,
+      (n, prev) => {
+        if (prev !== undefined && n > prev) scrollToBottom();
+      },
+    ),
+  );
+
+  const length = () => commentLength(draft().trim());
+  const overLimit = () => length() > DEFAULT_LIMITS.commentMaxLength;
+  const canSend = () =>
+    session.state === "ready" && talk() !== undefined && length() > 0 && !overLimit();
+  const submit = () => {
+    const t = talk();
+    if (!t || !canSend()) return;
+    room.post(t.id, draft().trim());
+    setDraft("");
+  };
   const placeholder = () => {
     const t = talk();
     return t ? commentPlaceholder(t) : "コメント";
@@ -146,13 +257,48 @@ function EventView(props: { data: GetEventResponse }) {
         )}
       </Show>
 
-      <main class={styles.comments}>
-        <p class={styles.empty}>
-          まだコメントはありません。
-          <br />
-          最初のひとことをどうぞ。ログインは不要です。
-        </p>
-      </main>
+      <div class={styles.commentsArea}>
+        <main ref={list} class={styles.comments} onScroll={onScroll}>
+          <Show
+            when={comments().length > 0 || pending().length > 0}
+            fallback={
+              <Show
+                when={loaded()}
+                fallback={<p class={styles.empty}>コメントを読み込んでいます…</p>}
+              >
+                <p class={styles.empty}>
+                  まだコメントはありません。
+                  <br />
+                  最初のひとことをどうぞ。ログインは不要です。
+                </p>
+              </Show>
+            }
+          >
+            <ol class={styles.commentList}>
+              <For each={comments()}>
+                {(c) => <CommentCard comment={c} onOpenUrl={confirmUrl} />}
+              </For>
+              <For each={pending()}>
+                {(p) => (
+                  <li class={styles.card} data-pending>
+                    <p class={styles.body}>{p.body}</p>
+                    <p class={styles.meta}>
+                      <span class={styles.mine}>あなた</span>
+                      <span>送信中…</span>
+                    </p>
+                  </li>
+                )}
+              </For>
+            </ol>
+          </Show>
+        </main>
+        <Show when={unread() > 0 && !atBottom()}>
+          <button type="button" class={styles.newPill} onClick={scrollToBottom}>
+            新着コメント {unread()} 件
+            <Icon name="arrowDown" size={16} />
+          </button>
+        </Show>
+      </div>
 
       <Show
         when={event().commentsOpen}
@@ -166,7 +312,23 @@ function EventView(props: { data: GetEventResponse }) {
             </button>
           </div>
         </Show>
-        <form class={styles.composer} onSubmit={(e) => e.preventDefault()}>
+        <Show when={session.state === "ready" && room.status() === "reconnecting"}>
+          <p class={styles.connection} role="status">
+            接続が切れました。再接続しています…
+          </p>
+        </Show>
+        <Show when={notice()}>
+          <p class={styles.notice} role="alert">
+            {notice()}
+          </p>
+        </Show>
+        <form
+          class={styles.composer}
+          onSubmit={(e) => {
+            e.preventDefault();
+            submit();
+          }}
+        >
           <textarea
             class={styles.input}
             rows={1}
@@ -174,13 +336,20 @@ function EventView(props: { data: GetEventResponse }) {
             placeholder={placeholder()}
             value={draft()}
             onInput={(e) => setDraft(e.currentTarget.value)}
+            onKeyDown={(e) => {
+              // Enter だけなら改行。Shift・⌘・Ctrl と一緒なら送信（変換確定の Enter は除く）
+              if (e.key !== "Enter" || e.isComposing) return;
+              if (!(e.shiftKey || e.metaKey || e.ctrlKey)) return;
+              e.preventDefault();
+              submit();
+            }}
           />
-          <button
-            type="submit"
-            class={styles.send}
-            aria-label="送信"
-            disabled={!connected() || draft().trim() === ""}
-          >
+          <Show when={DEFAULT_LIMITS.commentMaxLength - length() < COUNTER_FROM}>
+            <span class={styles.counter} data-over={overLimit() ? "" : undefined}>
+              {length()}/{DEFAULT_LIMITS.commentMaxLength}
+            </span>
+          </Show>
+          <button type="submit" class={styles.send} aria-label="送信" disabled={!canSend()}>
             <Icon name="send" />
           </button>
         </form>
@@ -209,6 +378,12 @@ function EventView(props: { data: GetEventResponse }) {
                       <span class={styles.talkTitle}>{t.title}</span>
                     </Show>
                   </span>
+                  <Show when={loaded()}>
+                    <span class={styles.talkCount}>
+                      <Icon name="comment" size={16} />
+                      {counts().get(t.id) ?? 0}
+                    </span>
+                  </Show>
                 </button>
               </li>
             )}
@@ -227,6 +402,44 @@ function EventView(props: { data: GetEventResponse }) {
           <Icon name="external" />
         </a>
       </Sheet>
+
+      <Sheet open={sheet() === "link"} onClose={closeSheet} title="この URL を開こうとしています">
+        <p class={styles.linkUrl}>{linkUrl()}</p>
+        <div class={styles.linkActions}>
+          <button type="button" class={button.secondary} onClick={closeSheet}>
+            キャンセル
+          </button>
+          {/* 新しいタブで開き、イベントページを残す */}
+          <a
+            class={button.primary}
+            href={linkUrl()}
+            target="_blank"
+            rel="noopener noreferrer"
+            onClick={closeSheet}
+          >
+            開く
+            <Icon name="external" size={16} />
+          </a>
+        </div>
+      </Sheet>
     </div>
+  );
+}
+
+function CommentCard(props: { comment: Comment; onOpenUrl: (url: string) => void }) {
+  return (
+    <li class={styles.card}>
+      <p class={styles.body}>
+        <CommentBody body={props.comment.body} onOpenUrl={props.onOpenUrl} />
+      </p>
+      <p class={styles.meta}>
+        <Show when={props.comment.mine}>
+          <span class={styles.mine}>あなた</span>
+        </Show>
+        <time dateTime={new Date(props.comment.createdAt).toISOString()}>
+          {timeFormat.format(props.comment.createdAt)}
+        </time>
+      </p>
+    </li>
   );
 }

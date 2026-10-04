@@ -86,13 +86,17 @@ flowchart LR
 | --- | --- | --- |
 | サーバー→ | `snapshot` | 接続直後に送る。イベント・発表枠・表示中の全コメント・いいね数・自分がいいねしたコメント |
 | サーバー→ | `comment.added` / `comment.removed` / `like.changed` | 差分。各メッセージに連番 `seq` を付ける |
+| サーバー→ | `comment.accepted` | 再送された投稿が登録済みだったとき、送った本人にだけ返す（`seq` なし） |
+| サーバー→ | `error` | `rate_limited` / `comments_closed` / `invalid_message` / `not_found`。投稿への応答なら `clientId` を付ける |
 | サーバー→ | `event.updated` / `talks.updated` | 管理操作の反映 |
 | クライアント→ | `comment.post` | `talkId`, `body`, クライアント生成の `clientId`（二重送信防止・自分の投稿の照合） |
 | クライアント→ | `comment.delete` / `like.set` | 自分のコメントの削除、いいねの付け外し |
 
 - 全発表分をまとめて配信し、発表の絞り込みはクライアントで行う。発表を切り替えても通信が起きず、一覧シートの件数表示もそのまま出せる
-- 再接続時は最後に受け取った `seq` を送り、それ以降の差分だけを受け取る（足りなければ `snapshot`）
+- 再接続時は接続 URL の `?since=` に最後に受け取った `seq` を付け、それ以降の差分だけを受け取る。EventRoom は差分を直近 1000 件だけ `updates` 表に残し、それより古い・不正な値なら `snapshot` を送る。送り直すときは本文を今の `comments` から組み立て、その間に非表示・削除されたものは送らない
+- 自分の投稿には `clientId` を付けて返す（`snapshot` 内も）。クライアントは受け付けの知らせがない投稿を再接続後に送り直し、EventRoom は `(author_id, client_id)` の一意制約で二重登録を防ぐ
 - WebSocket Hibernation API を使い、発言がない間は DO を休止させて実行時間の課金を止める
+- 死活確認はクライアントが `ping` を送り、`setWebSocketAutoResponse` で DO を起こさずに `pong` を返す
 - 非表示にしたコメントは参加者には `comment.removed` として配信し、本文を送らない
 
 ## スパム対策・セキュリティ
