@@ -115,45 +115,61 @@ function ManageView(props: { data: GetAdminResponse; reload: () => Promise<GetAd
   };
   onCleanup(() => clearTimeout(toastTimer));
 
-  // 発表枠は ID で突き合わせて差し替え、編集中の行（入力欄）を作り直さない
-  const setTalks = (talks: Talk[]) => setStore("talks", reconcile(talks, { key: "id" }));
+  // 発表枠は ID で突き合わせて差し替え、編集中の行（入力欄）を作り直さない。
+  // 発表枠の一覧を差し替えるたびに版を進め、取り消しが新しい変更を消さないようにする
+  let talksRevision = 0;
+  const setTalks = (talks: Talk[]) => {
+    talksRevision++;
+    setStore("talks", reconcile(talks, { key: "id" }));
+  };
 
-  /** 他の管理者の変更と行き違ったときなどに、最新の内容を読み込み直す */
-  const reload = async () => {
+  /** 最新の内容を読み込み直す。読み込めたら true */
+  const reload = async (): Promise<boolean> => {
     try {
       const latest = await props.reload();
       setStore("event", reconcile(latest.event));
       setTalks(latest.talks);
       setStore("commentCounts", reconcile(latest.commentCounts));
+      return true;
     } catch {
       // 読み込めなければ今の表示のまま
+      return false;
     }
   };
 
   /**
-   * 操作を即時に画面へ反映してからサーバーに送る。失敗したらトーストで知らせて元に戻す。
-   * 成功したら apply でサーバーの結果を反映する
+   * 操作を即時に画面へ反映してからサーバーに送る。成功したら apply でサーバーの結果を反映する。
+   * 失敗したらトーストで知らせて元に戻す。保存は重なりうるので、操作前の全体のスナップショットには戻さず
+   * （後から成功した変更まで消えてしまう）、サーバーの最新の内容を読み込み直す。
+   * 読み込めなければ、optimistic が返す取り消しで、この操作の変更だけを戻す
    */
   async function save<T>(options: {
-    optimistic?: () => void;
+    optimistic?: () => () => void;
     call: () => Promise<T>;
     apply: (result: T) => void;
     success?: string;
   }): Promise<boolean> {
-    const before = { event: { ...store.event }, talks: store.talks.map((t) => ({ ...t })) };
-    options.optimistic?.();
+    const undo = options.optimistic?.();
     try {
       options.apply(await options.call());
       if (options.success) showToast("ok", options.success);
       return true;
     } catch (err) {
-      setStore("event", reconcile(before.event));
-      setTalks(before.talks);
       showToast("error", failureMessage(err));
-      if (err instanceof ApiError && err.status === 409) await reload();
+      if (!(await reload())) undo?.();
       return false;
     }
   }
+
+  /** 発表枠の一覧を差し替え、その後に差し替えられていなければ元に戻す取り消しを返す */
+  const replaceTalks = (talks: Talk[]) => {
+    const before = store.talks.map((t) => ({ ...t }));
+    setTalks(talks);
+    const revision = talksRevision;
+    return () => {
+      if (talksRevision === revision) setTalks(before);
+    };
+  };
 
   function failureMessage(err: unknown): string {
     if (!(err instanceof ApiError)) return "保存できませんでした。通信状況を確認してください";
@@ -226,8 +242,19 @@ function ManageView(props: { data: GetAdminResponse; reload: () => Promise<GetAd
                   showToast("error", "発表者かタイトルのどちらかを入力してください");
                   return false;
                 }
+                const previous = current[field];
                 void save({
-                  optimistic: () => setStore("talks", (t) => t.id === talkId, field, value),
+                  optimistic: () => {
+                    setStore("talks", (t) => t.id === talkId, field, value);
+                    // その後に同じ項目が書き換えられていなければ戻す
+                    return () =>
+                      setStore(
+                        "talks",
+                        (t) => t.id === talkId && t[field] === value,
+                        field,
+                        previous,
+                      );
+                  },
                   call: () => updateTalk(eventId, talkId, { [field]: value }),
                   apply: (r) => setTalks(r.talks),
                   success: "保存しました",
@@ -244,7 +271,7 @@ function ManageView(props: { data: GetAdminResponse; reload: () => Promise<GetAd
               refresh={reload}
               onDelete={(talkId) =>
                 void save({
-                  optimistic: () => setTalks(store.talks.filter((t) => t.id !== talkId)),
+                  optimistic: () => replaceTalks(store.talks.filter((t) => t.id !== talkId)),
                   call: () => deleteTalk(eventId, talkId),
                   apply: (r) => setTalks(r.talks),
                   success: "発表枠を削除しました",
@@ -253,7 +280,7 @@ function ManageView(props: { data: GetAdminResponse; reload: () => Promise<GetAd
               onReorder={(ids) =>
                 void save({
                   optimistic: () =>
-                    setTalks(ids.flatMap((id) => store.talks.find((t) => t.id === id) ?? [])),
+                    replaceTalks(ids.flatMap((id) => store.talks.find((t) => t.id === id) ?? [])),
                   call: () => reorderTalks(eventId, ids),
                   apply: (r) => setTalks(r.talks),
                 })
@@ -265,7 +292,17 @@ function ManageView(props: { data: GetAdminResponse; reload: () => Promise<GetAd
               event={store.event}
               onSave={(patch) =>
                 void save({
-                  optimistic: () => setStore("event", patch as Partial<EventInfo>),
+                  optimistic: () => {
+                    const before = { ...store.event };
+                    const changed = Object.keys(patch) as (keyof UpdateEventRequest)[];
+                    setStore("event", patch as Partial<EventInfo>);
+                    // その後に書き換えられていない項目だけを戻す
+                    return () => {
+                      for (const key of changed) {
+                        if (store.event[key] === patch[key]) setStore("event", key, before[key]);
+                      }
+                    };
+                  },
                   call: () => updateEvent(eventId, patch),
                   apply: (r) => setStore("event", reconcile(r.event)),
                   success: "保存しました",
@@ -317,7 +354,7 @@ function TalksTab(props: {
   onEdit: (talkId: TalkId, field: TalkField, value: string) => boolean;
   onAdd: (talk: { speaker: string; title: string }) => Promise<boolean>;
   /** 最新の内容（コメント数など）を読み込み直す */
-  refresh: () => Promise<void>;
+  refresh: () => Promise<unknown>;
   onDelete: (talkId: TalkId) => void;
   onReorder: (ids: TalkId[]) => void;
 }) {

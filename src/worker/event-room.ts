@@ -302,10 +302,14 @@ export class EventRoom extends DurableObject<Env> {
     this.broadcast(() => ({ type: "event.updated", seq: this.seq, event }));
 
     if (patch.name !== undefined || patch.date !== undefined) {
-      // 同時に更新されても最後の値が残るよう、書き込み時点の値を入れる
-      await this.env.DB.prepare("UPDATE events SET name = ?, date = ? WHERE id = ?")
-        .bind(event.name, event.date, event.id)
-        .run();
+      // D1 への書き込みは外部 I/O なので、待つ間に別の更新が割り込み、D1 への書き込みの順番が入れ替わりうる。
+      // 他のリクエストを止めて 1 件ずつ書き、書く直前に読んだ最新の値を入れる（古い値で上書きしない）
+      await this.ctx.blockConcurrencyWhile(async () => {
+        const latest = this.readEvent()?.event ?? event;
+        await this.env.DB.prepare("UPDATE events SET name = ?, date = ? WHERE id = ?")
+          .bind(latest.name, latest.date, latest.id)
+          .run();
+      });
     }
     return { ok: true, value: event };
   }
