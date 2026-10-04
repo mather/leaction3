@@ -64,40 +64,70 @@ const DateSchema = v.pipe(
   }),
 );
 
-/** 空文字は null として扱う任意項目 */
-function optionalText<T extends v.GenericSchema<string, string>>(schema: T) {
+/** 空文字は null として扱う項目（null で消せる） */
+function nullableText<T extends v.GenericSchema<string, string>>(schema: T) {
   return v.pipe(
-    v.optional(v.nullable(v.string()), null),
+    v.nullable(v.string()),
     v.transform((s) => (s == null ? null : s.trim() || null)),
     v.nullable(schema),
   );
 }
 
-/** イベント作成の入力。上限値は環境変数で変わるので limits から組み立てる。 */
-export function createEventInputSchema(limits: Limits) {
-  const talk = v.pipe(
-    v.object({
-      speaker: v.pipe(v.string(), v.trim(), v.maxLength(limits.speakerMaxLength)),
-      title: v.pipe(v.string(), v.trim(), v.maxLength(limits.talkTitleMaxLength)),
-    }),
-    v.check((t) => t.speaker !== "" || t.title !== "", "発表者かタイトルのどちらかが必要です"),
-  );
-  return v.object({
+/** 空文字は null として扱う任意項目（省略時は null） */
+function optionalText<T extends v.GenericSchema<string, string>>(schema: T) {
+  return v.optional(nullableText(schema), null);
+}
+
+/** イベント情報と発表枠の各項目。作成と管理画面での更新で共有する */
+function eventFields(limits: Limits) {
+  return {
     name: v.pipe(v.string(), v.trim(), v.minLength(1), v.maxLength(limits.eventNameMaxLength)),
     date: DateSchema,
-    url: optionalText(
-      v.pipe(v.string(), v.maxLength(limits.eventUrlMaxLength), v.url(), v.regex(/^https?:\/\//i)),
+    url: v.pipe(
+      v.string(),
+      v.maxLength(limits.eventUrlMaxLength),
+      v.url(),
+      v.regex(/^https?:\/\//i),
     ),
-    hashtag: optionalText(
-      v.pipe(
-        v.string(),
-        v.transform((s) => s.replace(/^[#＃]/, "")),
-        v.minLength(1),
-        v.maxLength(limits.hashtagMaxLength),
-        v.regex(/^[^\s#＃]+$/u),
-      ),
+    hashtag: v.pipe(
+      v.string(),
+      v.transform((s) => s.replace(/^[#＃]/, "")),
+      v.minLength(1),
+      v.maxLength(limits.hashtagMaxLength),
+      v.regex(/^[^\s#＃]+$/u),
     ),
-    talks: v.pipe(v.array(talk), v.minLength(1), v.maxLength(limits.talksMaxCount)),
+    speaker: v.pipe(v.string(), v.trim(), v.maxLength(limits.speakerMaxLength)),
+    title: v.pipe(v.string(), v.trim(), v.maxLength(limits.talkTitleMaxLength)),
+  };
+}
+
+/** 発表者とタイトルのどちらかは空でない */
+export function isValidTalk(t: { speaker: string; title: string }): boolean {
+  return t.speaker !== "" || t.title !== "";
+}
+
+/** 発表枠 1 件（作成時と、管理画面での追加） */
+export function talkInputSchema(limits: Limits) {
+  const f = eventFields(limits);
+  return v.pipe(
+    v.object({ speaker: f.speaker, title: f.title }),
+    v.check(isValidTalk, "発表者かタイトルのどちらかが必要です"),
+  );
+}
+
+/** イベント作成の入力。上限値は環境変数で変わるので limits から組み立てる。 */
+export function createEventInputSchema(limits: Limits) {
+  const f = eventFields(limits);
+  return v.object({
+    name: f.name,
+    date: f.date,
+    url: optionalText(f.url),
+    hashtag: optionalText(f.hashtag),
+    talks: v.pipe(
+      v.array(talkInputSchema(limits)),
+      v.minLength(1),
+      v.maxLength(limits.talksMaxCount),
+    ),
     turnstileToken: v.optional(v.string()),
   });
 }
@@ -111,6 +141,67 @@ export const createSessionInputSchema = v.object({
 });
 
 export type CreateSessionInput = v.InferInput<typeof createSessionInputSchema>;
+
+/** 管理用トークン（generateToken の 32 バイト乱数を base64url にしたもの） */
+export const AdminTokenSchema = v.pipe(v.string(), v.regex(/^[A-Za-z0-9_-]{43}$/));
+
+/** 管理セッションの発行（POST /api/events/:id/admin/session）。token は管理 URL の `#k=` の値 */
+export const createAdminSessionInputSchema = v.object({ token: AdminTokenSchema });
+
+export type CreateAdminSessionInput = v.InferInput<typeof createAdminSessionInputSchema>;
+
+/** 1 項目以上あること（変更した項目だけを送る API で、空の更新を受け付けない） */
+function nonEmptyPatch<T extends object>(o: T): boolean {
+  return Object.values(o).some((value) => value !== undefined);
+}
+
+/** イベント情報の更新（PATCH /api/events/:id）。変更した項目だけを送る。URL・ハッシュタグは null か空文字で消す */
+export function updateEventInputSchema(limits: Limits) {
+  const f = eventFields(limits);
+  return v.pipe(
+    v.strictObject({
+      name: v.optional(f.name),
+      date: v.optional(f.date),
+      url: v.optional(nullableText(f.url)),
+      hashtag: v.optional(nullableText(f.hashtag)),
+    }),
+    v.check(nonEmptyPatch),
+  );
+}
+
+export type UpdateEventInput = v.InferInput<ReturnType<typeof updateEventInputSchema>>;
+export type UpdateEventData = v.InferOutput<ReturnType<typeof updateEventInputSchema>>;
+
+export type TalkInput = v.InferInput<ReturnType<typeof talkInputSchema>>;
+export type TalkData = v.InferOutput<ReturnType<typeof talkInputSchema>>;
+
+/**
+ * 発表枠の編集（PATCH /api/events/:id/talks/:talkId）。変更した項目だけを送る。
+ * 発表者・タイトルの両方が空にならないかは、今の値と合わせて EventRoom で確かめる
+ */
+export function updateTalkInputSchema(limits: Limits) {
+  const f = eventFields(limits);
+  return v.pipe(
+    v.strictObject({ speaker: v.optional(f.speaker), title: v.optional(f.title) }),
+    v.check(nonEmptyPatch),
+  );
+}
+
+export type UpdateTalkInput = v.InferInput<ReturnType<typeof updateTalkInputSchema>>;
+export type UpdateTalkData = v.InferOutput<ReturnType<typeof updateTalkInputSchema>>;
+
+/** 発表枠の並び順（PUT /api/events/:id/talks/order）。今あるすべての発表枠の ID を新しい順に並べる */
+export function reorderTalksInputSchema(limits: Limits) {
+  return v.object({
+    ids: v.pipe(
+      v.array(v.pipe(v.string(), v.minLength(1), v.maxLength(64))),
+      v.minLength(1),
+      v.maxLength(limits.talksMaxCount),
+    ),
+  });
+}
+
+export type ReorderTalksInput = v.InferInput<ReturnType<typeof reorderTalksInputSchema>>;
 
 /** コメント本文の文字数。サロゲートペア（絵文字など）も 1 文字と数え、クライアントの表示と揃える */
 export function commentLength(body: string): number {

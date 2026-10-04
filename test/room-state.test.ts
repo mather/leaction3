@@ -65,6 +65,18 @@ describe("applyServerMessage", () => {
     ]);
   });
 
+  it("talks.updated で発表枠を置き換え、削除された発表のコメントを取り除く", () => {
+    const other = { id: "talk0002", speaker: "佐藤", title: "" };
+    const state = apply(
+      loaded,
+      { type: "comment.added", seq: 3, comment: comment("c3", { talkId: other.id }) },
+      { type: "talks.updated", seq: 4, talks: [other] },
+    );
+    expect(state.seq).toBe(4);
+    expect(state.talks).toEqual([other]);
+    expect(state.comments.map((c) => c.id)).toEqual(["c3"]);
+  });
+
   it("自分の投稿が届いたら送信中から外す", () => {
     const pending = { clientId: "p1", talkId: "talk0001", body: "やあ" };
     const sent = addPending(loaded, pending);

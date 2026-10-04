@@ -1,0 +1,298 @@
+/* 管理画面。ヘッダー・タブ・各タブの中身。docs/ui.md「管理画面」 */
+.page {
+  max-width: 640px;
+  margin: 0 auto;
+  padding-bottom: calc(96px + env(safe-area-inset-bottom));
+}
+
+.status {
+  display: grid;
+  justify-items: center;
+  gap: 12px;
+  max-width: 480px;
+  margin: 0 auto;
+  padding: 48px 16px;
+  color: var(--text-sub);
+  text-align: center;
+}
+
+.status p {
+  margin: 0;
+}
+
+.header {
+  position: sticky;
+  top: 0;
+  z-index: 2;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 4px 16px 4px 4px;
+  background: var(--surface);
+  border-bottom: 1px solid var(--line);
+}
+
+.iconButton {
+  flex: none;
+  display: grid;
+  place-items: center;
+  width: var(--tap-min);
+  height: var(--tap-min);
+  border-radius: 50%;
+  color: var(--text);
+}
+
+.iconButton:hover {
+  background: var(--surface-sub);
+}
+
+.eventName {
+  flex: 1;
+  min-width: 0;
+  margin: 0;
+  overflow: hidden;
+  font-size: 1rem;
+  font-weight: 700;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.badge {
+  flex: none;
+  padding: 2px 10px;
+  border-radius: 999px;
+  background: var(--accent-soft);
+  color: var(--accent);
+  font-size: 0.75rem;
+  font-weight: 700;
+}
+
+/* 作成者は削除などができる、最も強い権限なので注意色にする */
+.badge[data-role="owner"] {
+  background: var(--warn-soft);
+  color: var(--warn);
+}
+
+.tabs {
+  position: sticky;
+  top: 53px;
+  z-index: 1;
+  display: flex;
+  background: var(--surface);
+  border-bottom: 1px solid var(--line);
+  overflow-x: auto;
+}
+
+.tab {
+  flex: 1 0 auto;
+  min-height: var(--tap-min);
+  padding: 0 12px;
+  border: none;
+  border-bottom: 3px solid transparent;
+  background: none;
+  color: var(--text-sub);
+  font: inherit;
+  font-weight: 500;
+  cursor: pointer;
+}
+
+.tab[aria-selected="true"] {
+  border-bottom-color: var(--accent);
+  color: var(--accent);
+  font-weight: 700;
+}
+
+.panel {
+  display: grid;
+  gap: 12px;
+  padding: 16px;
+}
+
+.hint {
+  margin: 0;
+  color: var(--text-sub);
+  font-size: 0.875rem;
+}
+
+.placeholder {
+  margin: 32px 0;
+  color: var(--text-sub);
+  text-align: center;
+}
+
+.card {
+  display: grid;
+  gap: 16px;
+  padding: 16px;
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-card);
+}
+
+.field {
+  display: grid;
+  gap: 6px;
+}
+
+.label {
+  font-size: 0.875rem;
+  font-weight: 700;
+}
+
+.input {
+  width: 100%;
+  min-height: var(--tap-min);
+  padding: 10px 12px;
+  border: 1px solid var(--line-strong);
+  border-radius: var(--radius-control);
+  background: var(--surface-sub);
+  color: var(--text);
+  font: inherit;
+  font-size: 16px; /* iOS の自動ズーム防止 */
+}
+
+.input:focus {
+  outline: 2px solid var(--accent);
+  outline-offset: -1px;
+  background: var(--surface);
+}
+
+.talks {
+  display: grid;
+  gap: 8px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.talk {
+  position: relative;
+  display: grid;
+  grid-template-columns: var(--tap-min) 20px 1fr var(--tap-min);
+  align-items: center;
+  gap: 4px;
+  padding: 8px 4px;
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-card);
+}
+
+/* ドラッグ中だけ、ずれる行を動かして見せる（離した瞬間に並べ替えるので、そのときは動かさない） */
+.talk[data-moving] {
+  transition: transform 150ms ease;
+}
+
+.talk[data-dragging] {
+  z-index: 1;
+  transition: none;
+  border-color: var(--accent);
+  box-shadow: 0 8px 24px rgb(27 31 36 / 0.16);
+}
+
+.handle {
+  display: grid;
+  place-items: center;
+  width: var(--tap-min);
+  height: var(--tap-min);
+  padding: 0;
+  border: none;
+  border-radius: var(--radius-control);
+  background: none;
+  color: var(--text-sub);
+  cursor: grab;
+  /* タッチでのドラッグをスクロールに取られないようにする */
+  touch-action: none;
+}
+
+.talk[data-dragging] .handle {
+  cursor: grabbing;
+}
+
+.talkNumber {
+  color: var(--text-sub);
+  font-weight: 700;
+  text-align: center;
+}
+
+.talkFields {
+  display: grid;
+  gap: 6px;
+  min-width: 0;
+}
+
+.removeTalk {
+  display: grid;
+  place-items: center;
+  width: var(--tap-min);
+  height: var(--tap-min);
+  border: none;
+  border-radius: var(--radius-control);
+  background: none;
+  color: var(--text-sub);
+  cursor: pointer;
+}
+
+.removeTalk:not(:disabled):hover {
+  background: var(--surface-sub);
+  color: var(--warn);
+}
+
+.removeTalk:disabled {
+  visibility: hidden;
+}
+
+.addTalk {
+  justify-self: start;
+}
+
+.sheetForm {
+  display: grid;
+  gap: 8px;
+}
+
+.sheetNote {
+  margin: 0;
+  color: var(--text-sub);
+  font-size: 0.875rem;
+}
+
+.deletePreview {
+  margin: 0;
+  padding: 12px;
+  border-radius: var(--radius-control);
+  background: var(--surface-sub);
+  overflow-wrap: anywhere;
+}
+
+.deleteNote {
+  margin: 0;
+  color: var(--warn);
+  font-size: 0.875rem;
+}
+
+.sheetActions {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+}
+
+.toast {
+  position: fixed;
+  left: 50%;
+  bottom: calc(24px + env(safe-area-inset-bottom));
+  z-index: 10;
+  width: max-content;
+  max-width: calc(100% - 32px);
+  margin: 0;
+  padding: 10px 16px;
+  border-radius: var(--radius-control);
+  background: var(--text);
+  color: #fff;
+  font-size: 0.875rem;
+  box-shadow: 0 8px 24px rgb(27 31 36 / 0.2);
+  transform: translateX(-50%);
+}
+
+.toast[data-kind="error"] {
+  background: var(--warn);
+}

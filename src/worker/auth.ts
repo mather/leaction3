@@ -1,7 +1,7 @@
 // 秘密トークンの発行とハッシュ化、Cookie の署名。トークンは平文で保存せず、SHA-256 のハッシュだけを持つ。
 
 import type { Context } from "hono";
-import { getSignedCookie, setSignedCookie } from "hono/cookie";
+import { deleteCookie, getSignedCookie, setSignedCookie } from "hono/cookie";
 
 const ID_ALPHABET = "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz_-";
 
@@ -76,4 +76,56 @@ function setParticipantCookie(c: Context, secret: string, id: string): Promise<v
     sameSite: "Lax",
     maxAge: PARTICIPANT_COOKIE_MAX_AGE_SEC,
   });
+}
+
+/** 文字列を定数時間で比べる（トークンのハッシュの照合に使う）。長さが違えば false */
+export function timingSafeEqual(a: string, b: string): boolean {
+  const encoder = new TextEncoder();
+  const x = encoder.encode(a);
+  const y = encoder.encode(b);
+  if (x.byteLength !== y.byteLength) return false;
+  return crypto.subtle.timingSafeEqual(x, y);
+}
+
+// 管理セッションの Cookie。管理 URL の `#k=` のトークンと引き換えに発行する。
+// 値はイベント ID と管理キー（admin_keys）の ID。キーが無効化されていないかは EventRoom が毎回確かめる。
+// Path をそのイベントの API に絞り、別のイベントへのリクエストには載せない。
+
+const ADMIN_COOKIE = "adm";
+/** 管理セッションの有効期限。管理画面を開くたびに延ばす */
+const ADMIN_COOKIE_MAX_AGE_SEC = 30 * 24 * 60 * 60;
+
+function adminCookiePath(eventId: string): string {
+  return `/api/events/${eventId}`;
+}
+
+/** 署名を検証して、そのイベントの管理キー ID を取り出す。Cookie がない・署名が不正・別のイベントなら null */
+export async function getAdminKeyId(
+  c: Context,
+  secret: string,
+  eventId: string,
+): Promise<string | null> {
+  const value = await getSignedCookie(c, secret, ADMIN_COOKIE);
+  if (typeof value !== "string") return null;
+  const [cookieEventId, keyId] = value.split(":");
+  return cookieEventId === eventId && keyId ? keyId : null;
+}
+
+export function setAdminCookie(
+  c: Context,
+  secret: string,
+  eventId: string,
+  keyId: string,
+): Promise<void> {
+  return setSignedCookie(c, ADMIN_COOKIE, `${eventId}:${keyId}`, secret, {
+    path: adminCookiePath(eventId),
+    httpOnly: true,
+    secure: true,
+    sameSite: "Lax",
+    maxAge: ADMIN_COOKIE_MAX_AGE_SEC,
+  });
+}
+
+export function clearAdminCookie(c: Context, eventId: string): void {
+  deleteCookie(c, ADMIN_COOKIE, { path: adminCookiePath(eventId), secure: true });
 }

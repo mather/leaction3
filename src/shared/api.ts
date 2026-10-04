@@ -1,6 +1,6 @@
 // HTTP API のリクエスト・レスポンス型。クライアントと Worker で共有する。
 
-import type { EventInfo, Talk } from "./protocol";
+import type { EventInfo, Talk, TalkId } from "./protocol";
 
 export type HealthResponse = {
   ok: true;
@@ -13,8 +13,13 @@ export type ErrorResponse = {
 };
 
 export type {
+  CreateAdminSessionInput as CreateAdminSessionRequest,
   CreateEventInput as CreateEventRequest,
   CreateSessionInput as CreateSessionRequest,
+  ReorderTalksInput as ReorderTalksRequest,
+  TalkInput as AddTalkRequest,
+  UpdateEventInput as UpdateEventRequest,
+  UpdateTalkInput as UpdateTalkRequest,
 } from "./schema";
 
 /** GET /api/events/:id。コメントは WebSocket の snapshot で受け取る */
@@ -36,4 +41,32 @@ export type TurnstileAction = "join" | "create_event";
 /** GET・POST /api/session。参加者 ID そのものはクライアントに渡さない */
 export type SessionResponse = {
   ok: true;
+};
+
+/** 管理者の権限。作成者（owner）と共同管理者（manager） */
+export type AdminRole = "owner" | "manager";
+
+/** POST /api/events/:id/admin/session */
+export type AdminSessionResponse = {
+  role: AdminRole;
+};
+
+/** GET /api/events/:id/admin。管理画面の表示に使う */
+export type GetAdminResponse = {
+  role: AdminRole;
+  event: EventInfo;
+  /** 並び順 */
+  talks: Talk[];
+  /** 発表ごとのコメント数（非表示のものも含む）。発表枠を削除するときの確認に使う */
+  commentCounts: Record<TalkId, number>;
+};
+
+/** PATCH /api/events/:id */
+export type UpdateEventResponse = {
+  event: EventInfo;
+};
+
+/** 発表枠の追加・編集・削除・並べ替え。操作後の全発表枠（並び順） */
+export type TalksResponse = {
+  talks: Talk[];
 };

@@ -1,28 +1,42 @@
-import { Hono } from "hono";
+import { type Context, Hono } from "hono";
+import { createMiddleware } from "hono/factory";
+import type { ContentfulStatusCode } from "hono/utils/http-status";
 import * as v from "valibot";
 import type {
+  AdminSessionResponse,
   CreateEventResponse,
   ErrorResponse,
+  GetAdminResponse,
   GetEventResponse,
   HealthResponse,
   SessionResponse,
+  TalksResponse,
+  UpdateEventResponse,
 } from "../shared/api";
 import {
+  createAdminSessionInputSchema,
   createEventInputSchema,
   createSessionInputSchema,
   EventIdSchema,
+  reorderTalksInputSchema,
   resolveLimits,
+  talkInputSchema,
+  updateEventInputSchema,
+  updateTalkInputSchema,
 } from "../shared/schema";
 import {
+  clearAdminCookie,
   cookieSecret,
   generateToken,
+  getAdminKeyId,
   getParticipantId,
   hashToken,
   issueParticipantId,
   randomId,
   renewParticipantId,
+  setAdminCookie,
 } from "./auth";
-import { PARTICIPANT_HEADER } from "./event-room";
+import { type AdminError, type AdminResult, PARTICIPANT_HEADER } from "./event-room";
 import { eventOgp, injectOgp } from "./ogp";
 import { verifyTurnstile } from "./turnstile";
 
@@ -40,7 +54,57 @@ async function findIndexedEvent(db: D1Database, id: string) {
     .first<{ id: string; name: string; date: string }>();
 }
 
+/** 同じオリジンのページからのリクエストか。別サイトから Cookie 付きで送らせる攻撃（CSRF・CSWSH）を防ぐ */
+function isSameOrigin(c: Context): boolean {
+  return c.req.header("Origin") === new URL(c.req.url).origin;
+}
+
+/** JSON の本文を検証する。JSON でない・スキーマに合わなければ null */
+async function parseBody<T extends v.GenericSchema>(
+  c: Context,
+  schema: T,
+): Promise<v.InferOutput<T> | null> {
+  const body = await c.req.json<unknown>().catch(() => undefined);
+  const parsed = v.safeParse(schema, body);
+  return parsed.success ? parsed.output : null;
+}
+
+const ADMIN_ERROR_STATUS = {
+  unauthorized: 401,
+  not_found: 404,
+  invalid_input: 400,
+  conflict: 409,
+} as const satisfies Record<AdminError, ContentfulStatusCode>;
+
 const api = new Hono<{ Bindings: Env }>();
+
+type AdminEnv = { Bindings: Env; Variables: { keyId: string } };
+
+/**
+ * 管理操作の前処理。書き込みは Origin を確かめ（CSRF 対策）、管理セッション Cookie から管理キー ID を取り出す。
+ * キーが無効化されていないかは EventRoom が確かめる
+ */
+const requireAdmin = createMiddleware<AdminEnv>(async (c, next) => {
+  if (c.req.method !== "GET" && !isSameOrigin(c)) {
+    return c.json<ErrorResponse>({ error: "forbidden_origin" }, 403);
+  }
+  const secret = cookieSecret(c.env);
+  if (!secret) return c.json<ErrorResponse>({ error: "server_misconfigured" }, 500);
+  const id = c.req.param("id") ?? "";
+  const keyId = v.is(EventIdSchema, id) ? await getAdminKeyId(c, secret, id) : null;
+  if (!keyId) return c.json<ErrorResponse>({ error: "no_admin_session" }, 401);
+  c.set("keyId", keyId);
+  await next();
+});
+
+/** EventRoom の管理操作の結果を HTTP の応答にする */
+function adminResponse<T, R>(c: Context, result: AdminResult<T>, body: (value: T) => R): Response {
+  if (!result.ok) {
+    const error = result.error === "unauthorized" ? "no_admin_session" : result.error;
+    return c.json<ErrorResponse>({ error }, ADMIN_ERROR_STATUS[result.error]);
+  }
+  return c.json(body(result.value));
+}
 
 // 雛形段階の疎通確認。Worker から D1 と EventRoom に届くことを確かめる。
 api.get("/health", async (c) => {
@@ -127,7 +191,7 @@ api.get("/events/:id/ws", async (c) => {
     return c.json<ErrorResponse>({ error: "upgrade_required" }, 426);
   }
   // 別サイトのページから、参加者の Cookie を使って接続されるのを防ぐ（Cross-Site WebSocket Hijacking）
-  if (c.req.header("Origin") !== new URL(c.req.url).origin) {
+  if (!isSameOrigin(c)) {
     return c.json<ErrorResponse>({ error: "forbidden_origin" }, 403);
   }
   const secret = cookieSecret(c.env);
@@ -142,6 +206,77 @@ api.get("/events/:id/ws", async (c) => {
   const headers = new Headers(c.req.raw.headers);
   headers.set(PARTICIPANT_HEADER, participantId);
   return c.env.EVENT_ROOM.getByName(id).fetch(new Request(c.req.raw, { headers }));
+});
+
+// 管理セッション。管理 URL の `#k=` のトークンを照合し、イベント単位の HttpOnly Cookie に入れ替える
+api.post("/events/:id/admin/session", async (c) => {
+  if (!isSameOrigin(c)) return c.json<ErrorResponse>({ error: "forbidden_origin" }, 403);
+  const secret = cookieSecret(c.env);
+  if (!secret) return c.json<ErrorResponse>({ error: "server_misconfigured" }, 500);
+  const input = await parseBody(c, createAdminSessionInputSchema);
+  if (!input) return c.json<ErrorResponse>({ error: "invalid_input" }, 400);
+  const id = c.req.param("id");
+  if (!(await findIndexedEvent(c.env.DB, id))) {
+    return c.json<ErrorResponse>({ error: "not_found" }, 404);
+  }
+  const key = await c.env.EVENT_ROOM.getByName(id).authenticate(await hashToken(input.token));
+  if (!key) return c.json<ErrorResponse>({ error: "invalid_token" }, 401);
+  await setAdminCookie(c, secret, id, key.keyId);
+  return c.json<AdminSessionResponse>({ role: key.role });
+});
+
+// 管理画面の表示に使う。イベントページのメニューも、これで管理セッションがあるかを確かめる
+api.get("/events/:id/admin", requireAdmin, async (c) => {
+  const id = c.req.param("id");
+  const result = await c.env.EVENT_ROOM.getByName(id).getAdmin(c.var.keyId);
+  if (!result.ok && result.error === "unauthorized") {
+    // 無効化されたキーの Cookie は持たせ続けない
+    clearAdminCookie(c, id);
+  } else if (result.ok) {
+    // 管理画面を開くたびに有効期限を延ばす
+    const secret = cookieSecret(c.env);
+    if (secret) await setAdminCookie(c, secret, id, c.var.keyId);
+  }
+  return adminResponse(c, result, (value): GetAdminResponse => value);
+});
+
+api.patch("/events/:id", requireAdmin, async (c) => {
+  const input = await parseBody(c, updateEventInputSchema(resolveLimits(c.env)));
+  if (!input) return c.json<ErrorResponse>({ error: "invalid_input" }, 400);
+  const room = c.env.EVENT_ROOM.getByName(c.req.param("id"));
+  const result = await room.updateEvent(c.var.keyId, input);
+  return adminResponse(c, result, (event): UpdateEventResponse => ({ event }));
+});
+
+api.post("/events/:id/talks", requireAdmin, async (c) => {
+  const input = await parseBody(c, talkInputSchema(resolveLimits(c.env)));
+  if (!input) return c.json<ErrorResponse>({ error: "invalid_input" }, 400);
+  const room = c.env.EVENT_ROOM.getByName(c.req.param("id"));
+  const result = await room.addTalk(c.var.keyId, input);
+  return adminResponse(c, result, (talks): TalksResponse => ({ talks }));
+});
+
+// /talks/:talkId より先に登録し、order を発表枠の ID とみなさない
+api.put("/events/:id/talks/order", requireAdmin, async (c) => {
+  const input = await parseBody(c, reorderTalksInputSchema(resolveLimits(c.env)));
+  if (!input) return c.json<ErrorResponse>({ error: "invalid_input" }, 400);
+  const room = c.env.EVENT_ROOM.getByName(c.req.param("id"));
+  const result = await room.reorderTalks(c.var.keyId, input.ids);
+  return adminResponse(c, result, (talks): TalksResponse => ({ talks }));
+});
+
+api.patch("/events/:id/talks/:talkId", requireAdmin, async (c) => {
+  const input = await parseBody(c, updateTalkInputSchema(resolveLimits(c.env)));
+  if (!input) return c.json<ErrorResponse>({ error: "invalid_input" }, 400);
+  const room = c.env.EVENT_ROOM.getByName(c.req.param("id"));
+  const result = await room.updateTalk(c.var.keyId, c.req.param("talkId"), input);
+  return adminResponse(c, result, (talks): TalksResponse => ({ talks }));
+});
+
+api.delete("/events/:id/talks/:talkId", requireAdmin, async (c) => {
+  const room = c.env.EVENT_ROOM.getByName(c.req.param("id"));
+  const result = await room.deleteTalk(c.var.keyId, c.req.param("talkId"));
+  return adminResponse(c, result, (talks): TalksResponse => ({ talks }));
 });
 
 api.all("*", (c) => c.json<ErrorResponse>({ error: "not_found" }, 404));

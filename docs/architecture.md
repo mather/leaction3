@@ -72,9 +72,10 @@ flowchart LR
 | `GET /api/events/:id` | 誰でも | イベント情報と発表枠 |
 | `GET /api/events/:id/ws` | 参加者 Cookie | WebSocket への切り替え |
 | `POST /api/events/:id/admin/session` | 作成者・共同管理者トークン | トークンを管理セッション Cookie に入れ替える |
+| `GET /api/events/:id/admin` | 管理 | 権限・イベント情報・発表枠・発表ごとのコメント数（管理画面の表示と、メニューに「イベントを管理する」を出すかの判定） |
 | `PATCH /api/events/:id` | 管理 | イベント情報の更新（変更した項目だけ） |
-| `POST` / `PATCH` / `DELETE /api/events/:id/talks[/:talkId]` | 管理 | 発表枠の追加・編集・削除 |
-| `PUT /api/events/:id/talks/order` | 管理 | 並び順（ID の配列） |
+| `POST` / `PATCH` / `DELETE /api/events/:id/talks[/:talkId]` | 管理 | 発表枠の追加・編集・削除。最後の 1 枠は削除できない（409） |
+| `PUT /api/events/:id/talks/order` | 管理 | 並び順（今あるすべての ID の配列。過不足があれば 409） |
 | `POST /api/events/:id/comments/:cid/hide`（と `unhide`） | 管理 | コメントの非表示・再表示 |
 | `POST /api/events/:id/authors/:aid/hide` | 管理 | 投稿者単位の一括非表示 |
 | `POST` / `DELETE /api/events/:id/admin-keys[/:keyId]` | 作成者 | 共同管理者 URL の発行・無効化 |
@@ -101,6 +102,8 @@ flowchart LR
 - `like.changed` の `likedByMe` は、いいねを付け外した本人の接続にだけ付ける（他の人の状態は変わらないため）。状態が変わらない `like.set`（いいね済みへのいいね等）は何も配信しない
 - 自分のコメントへのいいねは `invalid_message`、他人のコメントの削除は `not_found` で拒否する。自分のコメントの削除は非表示と違い、コメントといいねを実際に消す
 - 送り直す差分は 1 件につき必ず 1 通にして `seq` を飛ばさない。その後に非表示・削除されたコメントの差分は `comment.removed` として送る
+- `event.updated` / `talks.updated` も `seq` を付けて `updates` 表に残し、送り直すときは送る時点のイベント情報・発表枠を入れる
+- 発表枠を削除したときは `talks.updated` だけを送り、クライアントは消えた発表のコメントを取り除く
 
 ## スパム対策・セキュリティ
 
@@ -124,6 +127,7 @@ flowchart LR
 - 参加者 Cookie の有効期限は 1 年。イベントページを開くたびに同じ ID で出し直して延ばすので、イベントの最中には切れない
 - Turnstile は用途ごとに action（`join`・`create_event`）を付け、Worker で一致を確かめる
 - 管理操作の HTTP は `Origin` ヘッダーを検証して CSRF を防ぐ
+- 管理セッション Cookie（`adm`）はイベント ID と管理キー ID を署名したもので、`Path=/api/events/{id}` に絞る。有効期限は 30 日で、管理画面を開くたびに延ばす。キーが無効化されていないかは EventRoom が操作のたびに確かめる
 - WebSocket 接続時も `Origin` を検証する
 - トークンの照合は定数時間比較で行う
 - CSP を設定し、外部スクリプトは Turnstile など必要なものに限る
