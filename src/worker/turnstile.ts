@@ -27,9 +27,16 @@ export async function verifyTurnstile(
       signal: AbortSignal.timeout(SITEVERIFY_TIMEOUT_MS),
     });
     if (!res.ok) return false;
-    const result = await res.json<{ success: boolean; action?: string }>();
+    const result = await res.json<{
+      success: boolean;
+      action?: string;
+      metadata?: { result_with_testing_key?: boolean };
+    }>();
+    if (result.success !== true) return false;
+    // テスト用の秘密鍵（プレビュー環境）の応答には action が入らないので照合しない
+    if (result.metadata?.result_with_testing_key === true) return true;
     // 別の用途で取ったトークンの使い回しを防ぐ
-    return result.success === true && result.action === action;
+    return result.action === action;
   } catch {
     // 通信失敗・タイムアウト・不正な応答は検証失敗として扱う
     return false;

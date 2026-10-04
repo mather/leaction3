@@ -27,7 +27,7 @@ flowchart LR
 | Turnstile | イベントページを開いたときと作成時に 1 回だけ |
 | R2（後日） | 終了イベントの JSON アーカイブ |
 
-開発環境は Wrangler と Vite（Cloudflare Vite プラグイン）で、DO・D1 も含めてローカルで動かす。デプロイは GitHub Actions から行い、PR ごとにプレビューを出す現行の運用を引き継ぐ。
+開発環境は Wrangler と Vite（Cloudflare Vite プラグイン）で、DO・D1 も含めてローカルで動かす。デプロイは GitHub Actions から行い、PR ごとにプレビューを出す現行の運用を引き継ぐ。main への push で本番にデプロイし、PR はプレビュー環境（`wrangler.jsonc` の `env.preview`。Worker `leaction-preview` と D1 `leaction-preview` で本番とデータを分ける）に上書きでデプロイする。プレビュー環境は全 PR で 1 つで、Turnstile はテスト用キーを使う。手順は README の「デプロイ」を参照。
 
 ## データモデル
 

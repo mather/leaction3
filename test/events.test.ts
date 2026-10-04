@@ -122,9 +122,12 @@ describe("EventRoom.initialize", () => {
     const stub = env.EVENT_ROOM.getByName("broken01");
     // talks.speaker の NOT NULL 制約に違反させる
     const broken = { ...params.event, talks: [{ speaker: null as unknown as string, title: "b" }] };
-    await expect(
-      stub.initialize({ id: "broken01", event: broken, ownerTokenHash: params.ownerTokenHash }),
-    ).rejects.toThrow();
+    // RPC 越しに投げると workerd が未処理の reject として報告するので、DO の中で直接呼ぶ
+    await runInDurableObject(stub, (room) =>
+      expect(
+        room.initialize({ id: "broken01", event: broken, ownerTokenHash: params.ownerTokenHash }),
+      ).rejects.toThrow(),
+    );
     const indexed = await env.DB.prepare("SELECT 1 FROM events WHERE id = 'broken01'").first();
     expect(indexed).toBeNull();
     const rows = await runInDurableObject(stub, (_, state) =>
@@ -172,6 +175,46 @@ describe("verifyTurnstile", () => {
       const secretEnv = { TURNSTILE_SECRET_KEY: "secret" };
       expect(await verifyTurnstile(secretEnv, "token", undefined, "join")).toBe(true);
       expect(await verifyTurnstile(secretEnv, "token", undefined, "create_event")).toBe(false);
+    } finally {
+      spy.mockRestore();
+    }
+  });
+
+  it("テスト用の秘密鍵の応答なら action を照合しない", async () => {
+    const spy = vi
+      .spyOn(globalThis, "fetch")
+      .mockImplementation(async () =>
+        Response.json({ success: true, metadata: { result_with_testing_key: true } }),
+      );
+    try {
+      expect(
+        await verifyTurnstile(
+          { TURNSTILE_SECRET_KEY: "1x0000000000000000000000000000000AA" },
+          "XXXX.DUMMY.TOKEN.XXXX",
+          undefined,
+          "create_event",
+        ),
+      ).toBe(true);
+    } finally {
+      spy.mockRestore();
+    }
+  });
+
+  it("テスト用の秘密鍵でも失敗の応答なら拒否する", async () => {
+    const spy = vi
+      .spyOn(globalThis, "fetch")
+      .mockImplementation(async () =>
+        Response.json({ success: false, metadata: { result_with_testing_key: true } }),
+      );
+    try {
+      expect(
+        await verifyTurnstile(
+          { TURNSTILE_SECRET_KEY: "2x0000000000000000000000000000000AA" },
+          "XXXX.DUMMY.TOKEN.XXXX",
+          undefined,
+          "create_event",
+        ),
+      ).toBe(false);
     } finally {
       spy.mockRestore();
     }
