@@ -122,9 +122,12 @@ describe("EventRoom.initialize", () => {
     const stub = env.EVENT_ROOM.getByName("broken01");
     // talks.speaker の NOT NULL 制約に違反させる
     const broken = { ...params.event, talks: [{ speaker: null as unknown as string, title: "b" }] };
-    await expect(
-      stub.initialize({ id: "broken01", event: broken, ownerTokenHash: params.ownerTokenHash }),
-    ).rejects.toThrow();
+    // RPC 越しに投げると workerd が未処理の reject として報告するので、DO の中で直接呼ぶ
+    await runInDurableObject(stub, (room) =>
+      expect(
+        room.initialize({ id: "broken01", event: broken, ownerTokenHash: params.ownerTokenHash }),
+      ).rejects.toThrow(),
+    );
     const indexed = await env.DB.prepare("SELECT 1 FROM events WHERE id = 'broken01'").first();
     expect(indexed).toBeNull();
     const rows = await runInDurableObject(stub, (_, state) =>
