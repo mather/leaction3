@@ -180,6 +180,46 @@ describe("verifyTurnstile", () => {
     }
   });
 
+  it("テスト用の秘密鍵の応答なら action を照合しない", async () => {
+    const spy = vi
+      .spyOn(globalThis, "fetch")
+      .mockImplementation(async () =>
+        Response.json({ success: true, metadata: { result_with_testing_key: true } }),
+      );
+    try {
+      expect(
+        await verifyTurnstile(
+          { TURNSTILE_SECRET_KEY: "1x0000000000000000000000000000000AA" },
+          "XXXX.DUMMY.TOKEN.XXXX",
+          undefined,
+          "create_event",
+        ),
+      ).toBe(true);
+    } finally {
+      spy.mockRestore();
+    }
+  });
+
+  it("テスト用の秘密鍵でも失敗の応答なら拒否する", async () => {
+    const spy = vi
+      .spyOn(globalThis, "fetch")
+      .mockImplementation(async () =>
+        Response.json({ success: false, metadata: { result_with_testing_key: true } }),
+      );
+    try {
+      expect(
+        await verifyTurnstile(
+          { TURNSTILE_SECRET_KEY: "2x0000000000000000000000000000000AA" },
+          "XXXX.DUMMY.TOKEN.XXXX",
+          undefined,
+          "create_event",
+        ),
+      ).toBe(false);
+    } finally {
+      spy.mockRestore();
+    }
+  });
+
   it("秘密鍵があるのにトークンがなければ拒否する", async () => {
     expect(
       await verifyTurnstile(
