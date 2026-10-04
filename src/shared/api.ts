@@ -59,6 +59,41 @@ export type GetAdminResponse = {
   talks: Talk[];
   /** 発表ごとのコメント数（非表示のものも含む）。発表枠を削除するときの確認に使う */
   commentCounts: Record<TalkId, number>;
+  /** 削除済みなら削除日時と復元の期限。削除済みのイベントを開けるのは作成者だけ */
+  deletion: EventDeletion | null;
+};
+
+/** イベントの論理削除の状態。時刻は UNIX エポックからのミリ秒 */
+export type EventDeletion = {
+  deletedAt: number;
+  /** この時刻を過ぎると全データを消し、復元できなくなる */
+  restorableUntil: number;
+};
+
+/** DELETE /api/events/:id */
+export type DeleteEventResponse = {
+  deletion: EventDeletion;
+};
+
+/** 共同管理者 URL（管理キー）の 1 件。トークンは発行時にしか返さない */
+export type AdminKey = {
+  id: string;
+  /** UNIX エポックからのミリ秒 */
+  createdAt: number;
+  /** 無効化した時刻。有効なら null */
+  revokedAt: number | null;
+};
+
+/** GET /api/events/:id/admin-keys と、無効化の結果。共同管理者 URL の一覧（新しい順） */
+export type AdminKeysResponse = {
+  keys: AdminKey[];
+};
+
+/** POST /api/events/:id/admin-keys */
+export type CreateAdminKeyResponse = {
+  key: AdminKey;
+  /** 共同管理者トークン。ハッシュしか保存しないため、このレスポンスでしか受け取れない */
+  token: string;
 };
 
 /** PATCH /api/events/:id */

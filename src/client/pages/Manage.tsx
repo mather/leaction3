@@ -14,7 +14,9 @@ import {
 import { createStore, reconcile } from "solid-js/store";
 import type {
   AdminComment,
+  AdminKey,
   AdminRole,
+  EventDeletion,
   GetAdminResponse,
   UpdateEventRequest,
 } from "../../shared/api";
@@ -23,20 +25,27 @@ import { DEFAULT_LIMITS, isValidTalk } from "../../shared/schema";
 import button from "../components/button.module.css";
 import { Icon } from "../components/Icon";
 import { Sheet } from "../components/Sheet";
+import { UrlField } from "../components/UrlField";
 import {
   ApiError,
   addTalk,
+  createAdminKey,
   createAdminSession,
+  deleteEvent,
   deleteTalk,
   getAdmin,
   getAdminComments,
+  getAdminKeys,
   reorderTalks,
+  restoreEvent,
+  revokeAdminKey,
   setAuthorHidden,
   setCommentHidden,
   updateEvent,
   updateTalk,
 } from "../lib/api";
 import { talkLabel } from "../lib/talks";
+import { manageUrl } from "../lib/urls";
 import styles from "./Manage.module.css";
 
 /**
@@ -61,7 +70,7 @@ export function Manage() {
   const params = useParams<{ id: string }>();
   // 入れ替えに成功するまではトークンを手元に残し、再試行に使う
   let token = takeTokenFromHash();
-  const [data, { refetch }] = createResource(
+  const [data, { refetch, mutate }] = createResource(
     () => params.id,
     async (id) => {
       const result = await loadAdmin(id, token);
@@ -101,7 +110,27 @@ export function Manage() {
         </div>
       </Match>
       <Match when={data.state === "ready" && data()}>
-        {(d) => <ManageView data={d()} reload={() => getAdmin(params.id)} />}
+        {(d) => (
+          // 削除済みなら復元の画面を出す。削除・復元したら表示内容を差し替えて画面を切り替える
+          <Show
+            when={d().deletion}
+            fallback={
+              <ManageView
+                data={d()}
+                reload={() => getAdmin(params.id)}
+                onDeleted={(deletion) => mutate({ ...d(), deletion })}
+              />
+            }
+          >
+            {(deletion) => (
+              <DeletedView
+                event={d().event}
+                deletion={deletion()}
+                onRestored={(restored) => mutate(restored)}
+              />
+            )}
+          </Show>
+        )}
       </Match>
     </Switch>
   );
@@ -116,7 +145,75 @@ const TOAST_MS = { ok: 2000, error: 5000 };
 
 type Toast = { kind: "ok" | "error"; message: string };
 
-function ManageView(props: { data: GetAdminResponse; reload: () => Promise<GetAdminResponse> }) {
+/** 削除・復元の期限などの日時 */
+const dateTimeFormat = new Intl.DateTimeFormat("ja-JP", {
+  dateStyle: "medium",
+  timeStyle: "short",
+});
+
+/** 削除済みのイベントの管理画面（作成者だけが開ける）。期限までは復元できる */
+function DeletedView(props: {
+  event: EventInfo;
+  deletion: EventDeletion;
+  onRestored: (data: GetAdminResponse) => void;
+}) {
+  const [restoring, setRestoring] = createSignal(false);
+  const [error, setError] = createSignal<string>();
+  const restore = async () => {
+    setRestoring(true);
+    setError(undefined);
+    try {
+      props.onRestored(await restoreEvent(props.event.id));
+    } catch (err) {
+      setError(
+        err instanceof ApiError && err.status === 404
+          ? "復元の期限を過ぎたため、復元できません。"
+          : "復元できませんでした。通信状況を確認してください。",
+      );
+      setRestoring(false);
+    }
+  };
+
+  return (
+    <div class={styles.page}>
+      <header class={styles.header}>
+        <h1 class={styles.eventName}>{props.event.name}</h1>
+        <span class={styles.badge} data-role="owner">
+          {ROLE_LABELS.owner}
+        </span>
+      </header>
+      <main class={styles.panel}>
+        <section class={`${styles.card} ${styles.warnCard}`}>
+          <h2 class={styles.sectionTitle}>このイベントは削除されています</h2>
+          <p class={styles.cardText}>
+            参加者にはイベントページが表示されません。
+            {dateTimeFormat.format(props.deletion.restorableUntil)}{" "}
+            まで復元できます。過ぎるとコメントを含むすべてのデータが消えます。
+          </p>
+          <button
+            type="button"
+            class={button.primary}
+            disabled={restoring()}
+            onClick={() => void restore()}
+          >
+            {restoring() ? "復元しています…" : "イベントを復元する"}
+          </button>
+          <Show when={error()}>
+            <p class={styles.errorText} role="alert">
+              {error()}
+            </p>
+          </Show>
+        </section>
+      </main>
+    </div>
+  );
+}
+
+function ManageView(props: {
+  data: GetAdminResponse;
+  reload: () => Promise<GetAdminResponse>;
+  onDeleted: (deletion: EventDeletion) => void;
+}) {
   const [store, setStore] = createStore({
     event: props.data.event,
     talks: props.data.talks,
@@ -124,6 +221,8 @@ function ManageView(props: { data: GetAdminResponse; reload: () => Promise<GetAd
   });
   const eventId = props.data.event.id;
   const [tab, setTab] = createSignal<Tab>("talks");
+  // 発行した共同管理者 URL。一度しか表示できないので、タブを切り替えても消さない
+  const [issued, setIssued] = createSignal<IssuedKey>();
 
   const [toast, setToast] = createSignal<Toast>();
   let toastTimer: ReturnType<typeof setTimeout> | undefined;
@@ -234,6 +333,7 @@ function ManageView(props: { data: GetAdminResponse; reload: () => Promise<GetAd
     if (err.status === 401) {
       return "管理セッションが無効です。管理用 URL から開き直してください";
     }
+    if (err.status === 403) return "この操作は作成者だけができます";
     if (err.status === 400) return "入力内容を確認してください";
     if (err.status === 404) return "この発表枠は削除されています";
     if (err.status === 409) return "ほかの管理者の変更と重なりました。最新の内容を読み込みました";
@@ -413,7 +513,14 @@ function ManageView(props: { data: GetAdminResponse; reload: () => Promise<GetAd
             />
           </Match>
           <Match when={tab() === "admins"}>
-            <p class={styles.placeholder}>この機能は準備中です。</p>
+            <AdminsTab
+              eventId={eventId}
+              issued={issued()}
+              onIssued={setIssued}
+              onDeleted={props.onDeleted}
+              showToast={showToast}
+              failureMessage={failureMessage}
+            />
           </Match>
         </Switch>
       </main>
@@ -977,5 +1084,214 @@ function InfoTab(props: {
         />
       </label>
     </div>
+  );
+}
+
+/** 発行した直後の共同管理者 URL */
+type IssuedKey = { keyId: string; url: string };
+
+/** 管理者タブ（作成者だけ）。共同管理者 URL の発行・無効化と、イベントの削除 */
+function AdminsTab(props: {
+  eventId: string;
+  issued: IssuedKey | undefined;
+  onIssued: (issued: IssuedKey | undefined) => void;
+  onDeleted: (deletion: EventDeletion) => void;
+  showToast: (kind: Toast["kind"], message: string) => void;
+  failureMessage: (err: unknown) => string;
+}) {
+  // 共同管理者 URL の一覧（新しい順）。null は読み込み中
+  const [keys, setKeys] = createSignal<AdminKey[] | null>(null);
+  const load = async () => {
+    try {
+      setKeys((await getAdminKeys(props.eventId)).keys);
+    } catch (err) {
+      props.showToast("error", props.failureMessage(err));
+    }
+  };
+  void load();
+
+  const [issuing, setIssuing] = createSignal(false);
+  const issue = async () => {
+    setIssuing(true);
+    try {
+      const { key, token } = await createAdminKey(props.eventId);
+      setKeys((list) => [key, ...(list ?? [])]);
+      props.onIssued({ keyId: key.id, url: manageUrl(props.eventId, token) });
+    } catch (err) {
+      props.showToast(
+        "error",
+        err instanceof ApiError && err.status === 409
+          ? "共同管理者 URL が上限に達しています。使わない URL を無効化してください"
+          : props.failureMessage(err),
+      );
+    }
+    setIssuing(false);
+  };
+
+  const [revokeTarget, setRevokeTarget] = createSignal<AdminKey>();
+  const revoke = async (key: AdminKey) => {
+    try {
+      setKeys((await revokeAdminKey(props.eventId, key.id)).keys);
+      if (props.issued?.keyId === key.id) props.onIssued(undefined);
+      props.showToast("ok", "無効化しました");
+    } catch (err) {
+      props.showToast("error", props.failureMessage(err));
+      await load();
+    }
+  };
+
+  const [confirmingDelete, setConfirmingDelete] = createSignal(false);
+  const [deleting, setDeleting] = createSignal(false);
+  const remove = async () => {
+    setDeleting(true);
+    try {
+      const { deletion } = await deleteEvent(props.eventId);
+      setConfirmingDelete(false);
+      props.onDeleted(deletion);
+    } catch (err) {
+      props.showToast("error", props.failureMessage(err));
+      setDeleting(false);
+    }
+  };
+
+  /** 一覧での呼び名。発行順に番号を振る（一覧は新しい順） */
+  const keyLabel = (index: number) => `共同管理者 URL ${(keys()?.length ?? 0) - index}`;
+
+  return (
+    <>
+      <section class={styles.card}>
+        <h2 class={styles.sectionTitle}>共同管理者 URL</h2>
+        <p class={styles.cardText}>
+          共同管理者は、発表枠・基本情報の編集とコメントの管理ができます。共同管理者 URL
+          の発行とイベントの削除はできません。
+        </p>
+        <Show when={props.issued}>
+          {(issued) => (
+            <div class={styles.issued}>
+              <p class={styles.issuedNote}>
+                <Icon name="alert" />
+                この URL は今だけ表示されます。コピーして共同管理者に渡してください。
+              </p>
+              <UrlField label="発行した共同管理者 URL" url={issued().url} />
+            </div>
+          )}
+        </Show>
+        <button
+          type="button"
+          class={button.secondary}
+          disabled={issuing()}
+          onClick={() => void issue()}
+        >
+          <Icon name="plus" />
+          {issuing() ? "発行しています…" : "新しい共同管理者 URL を発行"}
+        </button>
+        <Show
+          when={keys()}
+          fallback={<p class={styles.hint}>共同管理者 URL を読み込んでいます…</p>}
+        >
+          {(list) => (
+            <Show
+              when={list().length > 0}
+              fallback={<p class={styles.hint}>まだ発行していません。</p>}
+            >
+              <ul class={styles.keys}>
+                <For each={list()}>
+                  {(key, i) => (
+                    <li class={styles.key} data-revoked={key.revokedAt !== null ? "" : undefined}>
+                      <span class={styles.keyInfo}>
+                        <span class={styles.keyName}>{keyLabel(i())}</span>
+                        <span class={styles.keyMeta}>
+                          {dateTimeFormat.format(key.createdAt)} 発行
+                          {key.revokedAt !== null &&
+                            ` · ${dateTimeFormat.format(key.revokedAt)} 無効化済み`}
+                        </span>
+                      </span>
+                      <Show when={key.revokedAt === null}>
+                        <button
+                          type="button"
+                          class={styles.textButton}
+                          data-danger
+                          onClick={() => setRevokeTarget(key)}
+                        >
+                          無効化
+                        </button>
+                      </Show>
+                    </li>
+                  )}
+                </For>
+              </ul>
+            </Show>
+          )}
+        </Show>
+      </section>
+
+      <section class={`${styles.card} ${styles.warnCard}`}>
+        <h2 class={styles.sectionTitle}>イベントの削除</h2>
+        <p class={styles.cardText}>
+          削除すると、参加者にはイベントページが表示されなくなります。削除後{" "}
+          {DEFAULT_LIMITS.deletedRetentionDays} 日間は、この作成者 URL から復元できます。
+        </p>
+        <button type="button" class={button.danger} onClick={() => setConfirmingDelete(true)}>
+          <Icon name="trash" />
+          イベントを削除
+        </button>
+      </section>
+
+      <Sheet
+        open={revokeTarget() !== undefined}
+        onClose={() => setRevokeTarget(undefined)}
+        title="この共同管理者 URL を無効化しますか？"
+      >
+        <p class={styles.deleteNote}>
+          この URL から開いている管理画面も、すぐに使えなくなります。無効化は取り消せません。
+        </p>
+        <p class={styles.sheetNote}>
+          引き続き管理してもらうときは、新しい URL を発行してください。
+        </p>
+        <div class={styles.sheetActions}>
+          <button type="button" class={button.secondary} onClick={() => setRevokeTarget(undefined)}>
+            キャンセル
+          </button>
+          <button
+            type="button"
+            class={button.danger}
+            onClick={() => {
+              const key = revokeTarget();
+              setRevokeTarget(undefined);
+              if (key) void revoke(key);
+            }}
+          >
+            無効化する
+          </button>
+        </div>
+      </Sheet>
+
+      <Sheet
+        open={confirmingDelete()}
+        onClose={() => setConfirmingDelete(false)}
+        title="このイベントを削除しますか？"
+      >
+        <p class={styles.deleteNote}>
+          参加者にはイベントページが表示されなくなり、接続中の参加者の画面も閉じます。
+        </p>
+        <p class={styles.sheetNote}>
+          削除後 {DEFAULT_LIMITS.deletedRetentionDays} 日間は、この作成者 URL
+          から復元できます。過ぎるとコメントを含むすべてのデータが消えます。
+        </p>
+        <div class={styles.sheetActions}>
+          <button type="button" class={button.secondary} onClick={() => setConfirmingDelete(false)}>
+            キャンセル
+          </button>
+          <button
+            type="button"
+            class={button.danger}
+            disabled={deleting()}
+            onClick={() => void remove()}
+          >
+            {deleting() ? "削除しています…" : "削除する"}
+          </button>
+        </div>
+      </Sheet>
+    </>
   );
 }

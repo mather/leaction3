@@ -57,7 +57,8 @@ flowchart LR
 
 - 非表示は削除ではなくフラグにし、管理画面から「表示に戻す」ができるようにする
 - 発表枠を削除したときは、その発表のコメントといいねも同じトランザクションで消す
-- イベント削除は `deleted_at` を入れる論理削除とし、7 日後に DO のアラームで全データを消す
+- イベント削除は `deleted_at` を入れる論理削除とし、7 日後に DO のアラームで全データを消す。D1 の `events` も削除時に `deleted_at` を入れ、掃除のときに行ごと消す
+- 復元の日数は `LIMIT_DELETED_RETENTION_DAYS` で変えられる
 
 ## HTTP API
 
@@ -72,16 +73,19 @@ flowchart LR
 | `POST /api/events` | 誰でも（Turnstile 必須） | イベント作成。返り値に作成者トークンを一度だけ含める |
 | `GET /api/events/:id` | 誰でも | イベント情報と発表枠 |
 | `GET /api/events/:id/ws` | 参加者 Cookie | WebSocket への切り替え |
-| `POST /api/events/:id/admin/session` | 作成者・共同管理者トークン | トークンを管理セッション Cookie に入れ替える |
-| `GET /api/events/:id/admin` | 管理 | 権限・イベント情報・発表枠・発表ごとのコメント数（管理画面の表示と、メニューに「イベントを管理する」を出すかの判定） |
+| `POST /api/events/:id/admin/session` | 作成者・共同管理者トークン | トークンを管理セッション Cookie に入れ替える。削除済みのイベントは作成者トークンだけ通す（復元のため） |
+| `GET /api/events/:id/admin` | 管理 | 権限・イベント情報・発表枠・発表ごとのコメント数・削除の状態（管理画面の表示と、メニューに「イベントを管理する」を出すかの判定）。削除済みなら作成者にだけ返す |
 | `PATCH /api/events/:id` | 管理 | イベント情報の更新（変更した項目だけ）。コメント受付の一時停止（`commentsOpen`）もここで切り替える |
 | `POST` / `PATCH` / `DELETE /api/events/:id/talks[/:talkId]` | 管理 | 発表枠の追加・編集・削除。最後の 1 枠は削除できない（409） |
 | `PUT /api/events/:id/talks/order` | 管理 | 並び順（今あるすべての ID の配列。過不足があれば 409） |
 | `GET /api/events/:id/admin/comments` | 管理 | コメント一覧（非表示も含む、新しい順）。投稿者は `author_keys` のキーで表す |
 | `POST /api/events/:id/comments/:cid/hide`（と `unhide`） | 管理 | コメントの非表示・再表示 |
 | `POST /api/events/:id/authors/:aid/hide`（と `unhide`） | 管理 | 投稿者単位の一括非表示と、その解除（`:aid` は投稿者のキー）。解除するとその投稿者の非表示のコメントをすべて表示に戻す |
-| `POST` / `DELETE /api/events/:id/admin-keys[/:keyId]` | 作成者 | 共同管理者 URL の発行・無効化 |
-| `DELETE /api/events/:id`（と `POST .../restore`） | 作成者 | 論理削除と復元 |
+| `GET /api/events/:id/admin-keys` | 作成者 | 共同管理者 URL の一覧（発行日・無効化日時。トークンは含めない） |
+| `POST` / `DELETE /api/events/:id/admin-keys[/:keyId]` | 作成者 | 共同管理者 URL の発行・無効化。発行時だけトークンを返す。有効な URL は上限（初期値 20）まで |
+| `DELETE /api/events/:id`（と `POST .../restore`） | 作成者 | 論理削除と復元。復元は期限（7 日）内だけで、過ぎていれば 404 |
+
+作成者だけの操作を共同管理者の管理セッションで呼ぶと 403 を返す。
 
 ## WebSocket メッセージ
 
@@ -108,6 +112,7 @@ flowchart LR
 - 送り直す差分は 1 件につき必ず 1 通にして `seq` を飛ばさない。その後に非表示・削除されたコメントの差分は `comment.removed` として送る
 - `event.updated` / `talks.updated` も `seq` を付けて `updates` 表に残し、送り直すときは送る時点のイベント情報・発表枠を入れる
 - 発表枠を削除したときは `talks.updated` だけを送り、クライアントは消えた発表のコメントを取り除く
+- イベントを削除したときは、全接続をコード `4404` で閉じる。クライアントは再接続せず「このイベントは削除されました」を出す
 
 ## スパム対策・セキュリティ
 
