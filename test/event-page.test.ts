@@ -5,7 +5,7 @@ import type { CreateEventResponse, GetEventResponse } from "../src/shared/api";
 import worker from "../src/worker/index";
 
 async function createEvent(name = "LT 会 #1") {
-  const res = await exports.default.fetch("http://example.com/api/events/new", {
+  const res = await exports.default.fetch("http://example.com/api/rooms", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({
@@ -22,10 +22,10 @@ async function createEvent(name = "LT 会 #1") {
   return (await res.json<CreateEventResponse>()).id;
 }
 
-describe("GET /api/events/:id", () => {
+describe("GET /api/rooms/:id", () => {
   it("イベント情報と発表枠を並び順で返す", async () => {
     const id = await createEvent();
-    const res = await exports.default.fetch(`http://example.com/api/events/${id}`);
+    const res = await exports.default.fetch(`http://example.com/api/rooms/${id}`);
     expect(res.status).toBe(200);
     const body = await res.json<GetEventResponse>();
     expect(body.event).toEqual({
@@ -47,7 +47,7 @@ describe("GET /api/events/:id", () => {
     ["存在しない ID", "nothere1"],
     ["形式が不正な ID", "bad"],
   ])("見つからなければ 404（%s）", async (_, id) => {
-    const res = await exports.default.fetch(`http://example.com/api/events/${id}`);
+    const res = await exports.default.fetch(`http://example.com/api/rooms/${id}`);
     expect(res.status).toBe(404);
     expect(await res.json()).toEqual({ error: "not_found" });
   });
@@ -55,12 +55,12 @@ describe("GET /api/events/:id", () => {
   it("削除済みなら 404", async () => {
     const id = await createEvent();
     await env.DB.prepare("UPDATE events SET deleted_at = 1 WHERE id = ?").bind(id).run();
-    const res = await exports.default.fetch(`http://example.com/api/events/${id}`);
+    const res = await exports.default.fetch(`http://example.com/api/rooms/${id}`);
     expect(res.status).toBe(404);
   });
 
   it("D1 にない ID では EventRoom を起こさない", async () => {
-    await exports.default.fetch("http://example.com/api/events/ghost001");
+    await exports.default.fetch("http://example.com/api/rooms/ghost001");
     // 起こすとコンストラクタがスキーマを書くので、ストレージを持つ DO として列挙される
     const ghost = env.EVENT_ROOM.idFromName("ghost001");
     const ids = await listDurableObjectIds(env.EVENT_ROOM);

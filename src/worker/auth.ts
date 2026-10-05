@@ -96,7 +96,7 @@ const ADMIN_COOKIE = "adm";
 const ADMIN_COOKIE_MAX_AGE_SEC = 30 * 24 * 60 * 60;
 
 function adminCookiePath(eventId: string): string {
-  return `/api/events/${eventId}`;
+  return `/api/rooms/${eventId}`;
 }
 
 /** 署名を検証して、そのイベントの管理キー ID を取り出す。Cookie がない・署名が不正・別のイベントなら null */

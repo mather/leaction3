@@ -165,8 +165,7 @@ api.post("/session", async (c) => {
 /** ID の衝突時に作り直す回数の上限（64^8 通りなので実際にはまず衝突しない） */
 const MAX_ID_ATTEMPTS = 5;
 
-// `/api/events` で終わる URL はコンテンツブロッカーに遮断されるので `/new` を付ける（#27）
-api.post("/events/new", async (c) => {
+api.post("/rooms", async (c) => {
   const body = await c.req.json<unknown>().catch(() => undefined);
   const parsed = v.safeParse(createEventInputSchema(resolveLimits(c.env)), body);
   if (!parsed.success) return c.json<ErrorResponse>({ error: "invalid_input" }, 400);
@@ -187,7 +186,7 @@ api.post("/events/new", async (c) => {
   return c.json<ErrorResponse>({ error: "id_exhausted" }, 500);
 });
 
-api.get("/events/:id", async (c) => {
+api.get("/rooms/:id", async (c) => {
   const id = c.req.param("id");
   const indexed = await findIndexedEvent(c.env.DB, id);
   const found = indexed && (await c.env.EVENT_ROOM.getByName(id).getEvent());
@@ -197,7 +196,7 @@ api.get("/events/:id", async (c) => {
 
 // WebSocket への切り替え。参加者 Cookie と Origin を確かめてから EventRoom に転送する。
 // 参加者 ID はサーバーが Cookie から決め、EventRoom にはヘッダーで渡す（クライアントの値は上書きする）
-api.get("/events/:id/ws", async (c) => {
+api.get("/rooms/:id/ws", async (c) => {
   if (c.req.header("Upgrade")?.toLowerCase() !== "websocket") {
     return c.json<ErrorResponse>({ error: "upgrade_required" }, 426);
   }
@@ -220,7 +219,7 @@ api.get("/events/:id/ws", async (c) => {
 });
 
 // 管理セッション。管理 URL の `#k=` のトークンを照合し、イベント単位の HttpOnly Cookie に入れ替える
-api.post("/events/:id/admin/session", async (c) => {
+api.post("/rooms/:id/admin/session", async (c) => {
   if (!isSameOrigin(c)) return c.json<ErrorResponse>({ error: "forbidden_origin" }, 403);
   const secret = cookieSecret(c.env);
   if (!secret) return c.json<ErrorResponse>({ error: "server_misconfigured" }, 500);
@@ -238,7 +237,7 @@ api.post("/events/:id/admin/session", async (c) => {
 });
 
 // 管理画面の表示に使う。イベントページのメニューも、これで管理セッションがあるかを確かめる
-api.get("/events/:id/admin", requireAdmin, async (c) => {
+api.get("/rooms/:id/admin", requireAdmin, async (c) => {
   const id = c.req.param("id");
   const result = await c.env.EVENT_ROOM.getByName(id).getAdmin(c.var.keyId);
   if (!result.ok && result.error === "unauthorized") {
@@ -252,7 +251,7 @@ api.get("/events/:id/admin", requireAdmin, async (c) => {
   return adminResponse(c, result, (value): GetAdminResponse => value);
 });
 
-api.patch("/events/:id", requireAdmin, async (c) => {
+api.patch("/rooms/:id", requireAdmin, async (c) => {
   const input = await parseBody(c, updateEventInputSchema(resolveLimits(c.env)));
   if (!input) return c.json<ErrorResponse>({ error: "invalid_input" }, 400);
   const room = c.env.EVENT_ROOM.getByName(c.req.param("id"));
@@ -260,7 +259,7 @@ api.patch("/events/:id", requireAdmin, async (c) => {
   return adminResponse(c, result, (event): UpdateEventResponse => ({ event }));
 });
 
-api.post("/events/:id/talks", requireAdmin, async (c) => {
+api.post("/rooms/:id/talks", requireAdmin, async (c) => {
   const input = await parseBody(c, talkInputSchema(resolveLimits(c.env)));
   if (!input) return c.json<ErrorResponse>({ error: "invalid_input" }, 400);
   const room = c.env.EVENT_ROOM.getByName(c.req.param("id"));
@@ -269,7 +268,7 @@ api.post("/events/:id/talks", requireAdmin, async (c) => {
 });
 
 // /talks/:talkId より先に登録し、order を発表枠の ID とみなさない
-api.put("/events/:id/talks/order", requireAdmin, async (c) => {
+api.put("/rooms/:id/talks/order", requireAdmin, async (c) => {
   const input = await parseBody(c, reorderTalksInputSchema(resolveLimits(c.env)));
   if (!input) return c.json<ErrorResponse>({ error: "invalid_input" }, 400);
   const room = c.env.EVENT_ROOM.getByName(c.req.param("id"));
@@ -277,7 +276,7 @@ api.put("/events/:id/talks/order", requireAdmin, async (c) => {
   return adminResponse(c, result, (talks): TalksResponse => ({ talks }));
 });
 
-api.patch("/events/:id/talks/:talkId", requireAdmin, async (c) => {
+api.patch("/rooms/:id/talks/:talkId", requireAdmin, async (c) => {
   const input = await parseBody(c, updateTalkInputSchema(resolveLimits(c.env)));
   if (!input) return c.json<ErrorResponse>({ error: "invalid_input" }, 400);
   const room = c.env.EVENT_ROOM.getByName(c.req.param("id"));
@@ -285,7 +284,7 @@ api.patch("/events/:id/talks/:talkId", requireAdmin, async (c) => {
   return adminResponse(c, result, (talks): TalksResponse => ({ talks }));
 });
 
-api.delete("/events/:id/talks/:talkId", requireAdmin, async (c) => {
+api.delete("/rooms/:id/talks/:talkId", requireAdmin, async (c) => {
   const room = c.env.EVENT_ROOM.getByName(c.req.param("id"));
   const result = await room.deleteTalk(c.var.keyId, c.req.param("talkId"));
   return adminResponse(c, result, (talks): TalksResponse => ({ talks }));
@@ -294,7 +293,7 @@ api.delete("/events/:id/talks/:talkId", requireAdmin, async (c) => {
 // モデレーション。コメント一覧（非表示も含む）、コメント単位・投稿者単位の非表示と表示に戻す操作。
 // 操作の結果として、最新のコメント一覧を返す
 
-api.get("/events/:id/admin/comments", requireAdmin, async (c) => {
+api.get("/rooms/:id/admin/comments", requireAdmin, async (c) => {
   const result = await c.env.EVENT_ROOM.getByName(c.req.param("id")).listComments(c.var.keyId);
   return adminResponse(c, result, (comments): AdminCommentsResponse => ({ comments }));
 });
@@ -303,13 +302,13 @@ for (const [action, hidden] of [
   ["hide", true],
   ["unhide", false],
 ] as const) {
-  api.post(`/events/:id/comments/:cid/${action}`, requireAdmin, async (c) => {
+  api.post(`/rooms/:id/comments/:cid/${action}`, requireAdmin, async (c) => {
     const room = c.env.EVENT_ROOM.getByName(c.req.param("id"));
     const result = await room.setCommentHidden(c.var.keyId, c.req.param("cid"), hidden);
     return adminResponse(c, result, (comments): AdminCommentsResponse => ({ comments }));
   });
 
-  api.post(`/events/:id/authors/:aid/${action}`, requireAdmin, async (c) => {
+  api.post(`/rooms/:id/authors/:aid/${action}`, requireAdmin, async (c) => {
     const room = c.env.EVENT_ROOM.getByName(c.req.param("id"));
     const result = await room.setAuthorHidden(c.var.keyId, c.req.param("aid"), hidden);
     return adminResponse(c, result, (comments): AdminCommentsResponse => ({ comments }));
@@ -319,30 +318,30 @@ for (const [action, hidden] of [
 // 作成者だけの操作。共同管理者 URL の発行・無効化と、イベントの削除・復元。
 // 共同管理者の管理セッションでは 403 になる
 
-api.get("/events/:id/admin-keys", requireAdmin, async (c) => {
+api.get("/rooms/:id/admin-keys", requireAdmin, async (c) => {
   const result = await c.env.EVENT_ROOM.getByName(c.req.param("id")).listAdminKeys(c.var.keyId);
   return adminResponse(c, result, (keys): AdminKeysResponse => ({ keys }));
 });
 
-api.post("/events/:id/admin-keys", requireAdmin, async (c) => {
+api.post("/rooms/:id/admin-keys", requireAdmin, async (c) => {
   const token = generateToken();
   const room = c.env.EVENT_ROOM.getByName(c.req.param("id"));
   const result = await room.createAdminKey(c.var.keyId, await hashToken(token));
   return adminResponse(c, result, (key): CreateAdminKeyResponse => ({ key, token }));
 });
 
-api.delete("/events/:id/admin-keys/:keyId", requireAdmin, async (c) => {
+api.delete("/rooms/:id/admin-keys/:keyId", requireAdmin, async (c) => {
   const room = c.env.EVENT_ROOM.getByName(c.req.param("id"));
   const result = await room.revokeAdminKey(c.var.keyId, c.req.param("keyId"));
   return adminResponse(c, result, (keys): AdminKeysResponse => ({ keys }));
 });
 
-api.delete("/events/:id", requireAdmin, async (c) => {
+api.delete("/rooms/:id", requireAdmin, async (c) => {
   const result = await c.env.EVENT_ROOM.getByName(c.req.param("id")).deleteEvent(c.var.keyId);
   return adminResponse(c, result, (deletion): DeleteEventResponse => ({ deletion }));
 });
 
-api.post("/events/:id/restore", requireAdmin, async (c) => {
+api.post("/rooms/:id/restore", requireAdmin, async (c) => {
   const result = await c.env.EVENT_ROOM.getByName(c.req.param("id")).restoreEvent(c.var.keyId);
   return adminResponse(c, result, (value): GetAdminResponse => value);
 });

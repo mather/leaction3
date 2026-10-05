@@ -80,8 +80,8 @@ pnpm cf-typegen         # worker-configuration.d.ts を再生成
 MVP を次の順で作る。各ステップで動く状態にしてから次へ進む。
 
 1. プロジェクト雛形: Vite + SolidJS + Worker + wrangler 設定、D1 と DO（`new_sqlite_classes`）のバインディング
-2. イベント作成: `POST /api/events/new`、owner トークン発行、D1 と EventRoom の初期化、作成完了画面
-3. イベントページ閲覧: `GET /api/events/:id`、`/e/:id` の OGP 差し込み、発表切り替え UI
+2. イベント作成: `POST /api/rooms`、owner トークン発行、D1 と EventRoom の初期化、作成完了画面
+3. イベントページ閲覧: `GET /api/rooms/:id`、`/e/:id` の OGP 差し込み、発表切り替え UI
 4. 参加者セッション: Turnstile 検証、参加者 ID Cookie の発行
 5. WebSocket: `snapshot`、`comment.post`、差分配信、`seq` による再接続時の取りこぼし補完
 6. いいね・自分のコメント削除

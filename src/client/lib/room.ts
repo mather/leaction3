@@ -15,7 +15,7 @@ import { RoomSocket, type SocketStatus } from "./ws";
 export type RoomError = { code: ErrorCode; pending?: PendingComment; commentId?: CommentId };
 
 function wsUrl(eventId: string, seq: number | null): string {
-  const url = new URL(`/api/events/${encodeURIComponent(eventId)}/ws`, location.href);
+  const url = new URL(`/api/rooms/${encodeURIComponent(eventId)}/ws`, location.href);
   url.protocol = url.protocol === "https:" ? "wss:" : "ws:";
   if (seq !== null) url.searchParams.set(WS_SINCE_PARAM, String(seq));
   return url.href;

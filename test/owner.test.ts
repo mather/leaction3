@@ -24,7 +24,7 @@ import {
 const DAY_MS = 24 * 60 * 60 * 1000;
 
 async function issueKey(id: string, cookie: string) {
-  const res = await request(`/api/events/${id}/admin-keys`, { method: "POST", cookie });
+  const res = await request(`/api/rooms/${id}/admin-keys`, { method: "POST", cookie });
   expect(res.status).toBe(200);
   return res.json<CreateAdminKeyResponse>();
 }
@@ -42,7 +42,7 @@ async function setup() {
 }
 
 function getAdmin(id: string, cookie: string) {
-  return request(`/api/events/${id}/admin`, { cookie });
+  return request(`/api/rooms/${id}/admin`, { cookie });
 }
 
 function readIndex(id: string) {
@@ -64,7 +64,7 @@ describe("共同管理者 URL", () => {
     const res = await getAdmin(id, manager);
     expect(res.status).toBe(200);
     expect((await res.json<GetAdminResponse>()).role).toBe("manager");
-    const patch = await request(`/api/events/${id}`, {
+    const patch = await request(`/api/rooms/${id}`, {
       method: "PATCH",
       cookie: manager,
       body: { name: "共同管理者が変更" },
@@ -82,7 +82,7 @@ describe("共同管理者 URL", () => {
     const { id, cookie } = await setupAdmin();
     const first = await issueKey(id, cookie);
     const second = await issueKey(id, cookie);
-    const res = await request(`/api/events/${id}/admin-keys`, { cookie });
+    const res = await request(`/api/rooms/${id}/admin-keys`, { cookie });
     expect(res.status).toBe(200);
     const { keys } = await res.json<AdminKeysResponse>();
     expect(keys).toEqual([second.key, first.key]);
@@ -91,7 +91,7 @@ describe("共同管理者 URL", () => {
 
   it("無効化すると、その URL の管理セッションはすぐに使えなくなり、URL からも入れない", async () => {
     const { id, cookie, manager, managerKey, managerToken } = await setup();
-    const res = await request(`/api/events/${id}/admin-keys/${managerKey.id}`, {
+    const res = await request(`/api/rooms/${id}/admin-keys/${managerKey.id}`, {
       method: "DELETE",
       cookie,
     });
@@ -100,7 +100,7 @@ describe("共同管理者 URL", () => {
     expect(keys[0]?.revokedAt).toEqual(expect.any(Number));
 
     expect((await getAdmin(id, manager)).status).toBe(401);
-    const patch = await request(`/api/events/${id}`, {
+    const patch = await request(`/api/rooms/${id}`, {
       method: "PATCH",
       cookie: manager,
       body: { name: "x" },
@@ -121,7 +121,7 @@ describe("共同管理者 URL", () => {
           .one().id,
     );
     for (const keyId of [ownerKeyId, "nothere1"]) {
-      const res = await request(`/api/events/${id}/admin-keys/${keyId}`, {
+      const res = await request(`/api/rooms/${id}/admin-keys/${keyId}`, {
         method: "DELETE",
         cookie,
       });
@@ -141,18 +141,18 @@ describe("共同管理者 URL", () => {
         );
       }
     });
-    const res = await request(`/api/events/${id}/admin-keys`, { method: "POST", cookie });
+    const res = await request(`/api/rooms/${id}/admin-keys`, { method: "POST", cookie });
     expect(res.status).toBe(409);
   });
 
   it("共同管理者は作成者だけの操作ができない（403）", async () => {
     const { id, manager, managerKey } = await setup();
     const forbidden = [
-      ["GET", `/api/events/${id}/admin-keys`],
-      ["POST", `/api/events/${id}/admin-keys`],
-      ["DELETE", `/api/events/${id}/admin-keys/${managerKey.id}`],
-      ["DELETE", `/api/events/${id}`],
-      ["POST", `/api/events/${id}/restore`],
+      ["GET", `/api/rooms/${id}/admin-keys`],
+      ["POST", `/api/rooms/${id}/admin-keys`],
+      ["DELETE", `/api/rooms/${id}/admin-keys/${managerKey.id}`],
+      ["DELETE", `/api/rooms/${id}`],
+      ["POST", `/api/rooms/${id}/restore`],
     ] as const;
     for (const [method, path] of forbidden) {
       const res = await request(path, { method, cookie: manager });
@@ -163,13 +163,13 @@ describe("共同管理者 URL", () => {
 
   it("Origin が違えば 403、管理 Cookie がなければ 401", async () => {
     const { id, cookie } = await setupAdmin();
-    const evil = await request(`/api/events/${id}/admin-keys`, {
+    const evil = await request(`/api/rooms/${id}/admin-keys`, {
       method: "POST",
       cookie,
       origin: "https://evil.example",
     });
     expect(evil.status).toBe(403);
-    const anonymous = await request(`/api/events/${id}/admin-keys`, { method: "POST" });
+    const anonymous = await request(`/api/rooms/${id}/admin-keys`, { method: "POST" });
     expect(anonymous.status).toBe(401);
   });
 });
@@ -184,20 +184,20 @@ describe("イベントの削除と復元", () => {
       ws.ws.addEventListener("close", (e) => resolve(e.code)),
     );
 
-    const res = await request(`/api/events/${id}`, { method: "DELETE", cookie });
+    const res = await request(`/api/rooms/${id}`, { method: "DELETE", cookie });
     expect(res.status).toBe(200);
     const { deletion } = await res.json<DeleteEventResponse>();
     expect(deletion.restorableUntil - deletion.deletedAt).toBe(7 * DAY_MS);
     expect(await closed).toBe(WS_CLOSE_EVENT_DELETED);
 
     expect(await readIndex(id)).toEqual({ deleted_at: deletion.deletedAt });
-    expect((await exports.default.fetch(`${ORIGIN}/api/events/${id}`)).status).toBe(404);
-    const reconnect = await upgrade(`/api/events/${id}/ws`, { Cookie: pid });
+    expect((await exports.default.fetch(`${ORIGIN}/api/rooms/${id}`)).status).toBe(404);
+    const reconnect = await upgrade(`/api/rooms/${id}/ws`, { Cookie: pid });
     expect(reconnect.status).toBe(404);
 
     // 共同管理者は使えなくなり、作成者も復元以外の管理はできない
     expect((await getAdmin(id, manager)).status).toBe(401);
-    const patch = await request(`/api/events/${id}`, {
+    const patch = await request(`/api/rooms/${id}`, {
       method: "PATCH",
       cookie,
       body: { name: "x" },
@@ -212,7 +212,7 @@ describe("イベントの削除と復元", () => {
 
   it("削除済みでも作成者 URL では開けて、削除の状態が返る", async () => {
     const { id, ownerToken, cookie, managerToken } = await setup();
-    await request(`/api/events/${id}`, { method: "DELETE", cookie });
+    await request(`/api/rooms/${id}`, { method: "DELETE", cookie });
 
     const session = await postAdminSession(id, ownerToken);
     expect(session.status).toBe(200);
@@ -231,14 +231,14 @@ describe("イベントの削除と復元", () => {
 
   it("7 日以内なら復元でき、参加者の画面と共同管理者 URL も元に戻る", async () => {
     const { id, cookie, manager } = await setup();
-    await request(`/api/events/${id}`, { method: "DELETE", cookie });
+    await request(`/api/rooms/${id}`, { method: "DELETE", cookie });
 
-    const res = await request(`/api/events/${id}/restore`, { method: "POST", cookie });
+    const res = await request(`/api/rooms/${id}/restore`, { method: "POST", cookie });
     expect(res.status).toBe(200);
     expect((await res.json<GetAdminResponse>()).deletion).toBeNull();
 
     expect(await readIndex(id)).toEqual({ deleted_at: null });
-    expect((await exports.default.fetch(`${ORIGIN}/api/events/${id}`)).status).toBe(200);
+    expect((await exports.default.fetch(`${ORIGIN}/api/rooms/${id}`)).status).toBe(200);
     expect((await getAdmin(id, manager)).status).toBe(200);
     const ws = await connect(id, await participant());
     await expectType(ws, "snapshot");
@@ -250,11 +250,11 @@ describe("イベントの削除と復元", () => {
 
   it("期限を過ぎたら復元できない（404）", async () => {
     const { id, cookie } = await setupAdmin();
-    await request(`/api/events/${id}`, { method: "DELETE", cookie });
+    await request(`/api/rooms/${id}`, { method: "DELETE", cookie });
     await runInDurableObject(env.EVENT_ROOM.getByName(id), (_, state) => {
       state.storage.sql.exec("UPDATE event SET deleted_at = ?", Date.now() - 8 * DAY_MS);
     });
-    const res = await request(`/api/events/${id}/restore`, { method: "POST", cookie });
+    const res = await request(`/api/rooms/${id}/restore`, { method: "POST", cookie });
     expect(res.status).toBe(404);
   });
 
@@ -262,7 +262,7 @@ describe("イベントの削除と復元", () => {
     const { id, cookie } = await setupAdmin();
     const ws = await connect(id, await participant());
     await expectType(ws, "snapshot");
-    await request(`/api/events/${id}`, { method: "DELETE", cookie });
+    await request(`/api/rooms/${id}`, { method: "DELETE", cookie });
     const stub = env.EVENT_ROOM.getByName(id);
     await runInDurableObject(stub, (_, state) => {
       state.storage.sql.exec("UPDATE event SET deleted_at = ?", Date.now() - 8 * DAY_MS);
@@ -277,17 +277,17 @@ describe("イベントの削除と復元", () => {
       ),
     );
     expect(counts).toEqual([0, 0, 0]);
-    expect((await request(`/api/events/${id}/restore`, { method: "POST", cookie })).status).toBe(
+    expect((await request(`/api/rooms/${id}/restore`, { method: "POST", cookie })).status).toBe(
       401,
     );
   });
 
   it("期限前に復元していれば、アラームが動いても何も消さない", async () => {
     const { id, cookie } = await setupAdmin();
-    await request(`/api/events/${id}`, { method: "DELETE", cookie });
+    await request(`/api/rooms/${id}`, { method: "DELETE", cookie });
     const stub = env.EVENT_ROOM.getByName(id);
     // 復元前に仕掛けたアラームが、取り消しと行き違いで動いた場合
-    await request(`/api/events/${id}/restore`, { method: "POST", cookie });
+    await request(`/api/rooms/${id}/restore`, { method: "POST", cookie });
     await runInDurableObject(stub, (_, state) => state.storage.setAlarm(Date.now()));
     await runDurableObjectAlarm(stub);
     expect(await readIndex(id)).toEqual({ deleted_at: null });

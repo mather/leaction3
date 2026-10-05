@@ -22,16 +22,16 @@ async function post(from: Client, other: Client, talk: string, body: string): Pr
 }
 
 async function listComments(id: string, cookie: string) {
-  const res = await request(`/api/events/${id}/admin/comments`, { cookie });
+  const res = await request(`/api/rooms/${id}/admin/comments`, { cookie });
   expect(res.status).toBe(200);
   return (await res.json<AdminCommentsResponse>()).comments;
 }
 
 function moderate(id: string, cookie: string, path: string) {
-  return request(`/api/events/${id}/${path}`, { method: "POST", cookie });
+  return request(`/api/rooms/${id}/${path}`, { method: "POST", cookie });
 }
 
-describe("GET /api/events/:id/admin/comments", () => {
+describe("GET /api/rooms/:id/admin/comments", () => {
   it("非表示のものも含めて新しい順に返し、投稿者は参加者 ID ではなくキーで表す", async () => {
     const { id, cookie, alice, aliceCookie, bob, talk } = await setup();
     const first = await post(alice, bob, talk, "1 件目");
@@ -58,7 +58,7 @@ describe("GET /api/events/:id/admin/comments", () => {
 
   it("管理 Cookie がなければ 401", async () => {
     const { id } = await setup();
-    const res = await request(`/api/events/${id}/admin/comments`);
+    const res = await request(`/api/rooms/${id}/admin/comments`);
     expect(res.status).toBe(401);
   });
 });
@@ -121,7 +121,7 @@ describe("コメントの非表示・表示に戻す", () => {
     const { id, cookie, alice, bob, talk } = await setup();
     expect((await moderate(id, cookie, "comments/nothere123/hide")).status).toBe(404);
     const commentId = await post(alice, bob, talk, "x");
-    const res = await request(`/api/events/${id}/comments/${commentId}/hide`, {
+    const res = await request(`/api/rooms/${id}/comments/${commentId}/hide`, {
       method: "POST",
       cookie,
       origin: "https://evil.example",
@@ -192,7 +192,7 @@ describe("投稿者単位の非表示", () => {
 describe("コメント受付の一時停止", () => {
   it("PATCH で停止すると参加者に event.updated を配信し、投稿を comments_closed で拒否する", async () => {
     const { id, cookie, alice, bob, talk } = await setup();
-    const res = await request(`/api/events/${id}`, {
+    const res = await request(`/api/rooms/${id}`, {
       method: "PATCH",
       cookie,
       body: { commentsOpen: false },
@@ -209,7 +209,7 @@ describe("コメント受付の一時停止", () => {
       clientId,
     });
 
-    await request(`/api/events/${id}`, { method: "PATCH", cookie, body: { commentsOpen: true } });
+    await request(`/api/rooms/${id}`, { method: "PATCH", cookie, body: { commentsOpen: true } });
     expect((await expectType(alice, "event.updated")).event.commentsOpen).toBe(true);
     await expectType(bob, "event.updated");
     await post(alice, bob, talk, "再開後の投稿");

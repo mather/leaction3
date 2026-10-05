@@ -151,7 +151,7 @@ export type CreateSessionInput = v.InferInput<typeof createSessionInputSchema>;
 /** 管理用トークン（generateToken の 32 バイト乱数を base64url にしたもの） */
 export const AdminTokenSchema = v.pipe(v.string(), v.regex(/^[A-Za-z0-9_-]{43}$/));
 
-/** 管理セッションの発行（POST /api/events/:id/admin/session）。token は管理 URL の `#k=` の値 */
+/** 管理セッションの発行（POST /api/rooms/:id/admin/session）。token は管理 URL の `#k=` の値 */
 export const createAdminSessionInputSchema = v.object({ token: AdminTokenSchema });
 
 export type CreateAdminSessionInput = v.InferInput<typeof createAdminSessionInputSchema>;
@@ -162,7 +162,7 @@ function nonEmptyPatch<T extends object>(o: T): boolean {
 }
 
 /**
- * イベント情報の更新（PATCH /api/events/:id）。変更した項目だけを送る。URL・ハッシュタグは null か空文字で消す。
+ * イベント情報の更新（PATCH /api/rooms/:id）。変更した項目だけを送る。URL・ハッシュタグは null か空文字で消す。
  * コメント受付の一時停止もここで切り替える
  */
 export function updateEventInputSchema(limits: Limits) {
@@ -187,7 +187,7 @@ export type TalkInput = v.InferInput<ReturnType<typeof talkInputSchema>>;
 export type TalkData = v.InferOutput<ReturnType<typeof talkInputSchema>>;
 
 /**
- * 発表枠の編集（PATCH /api/events/:id/talks/:talkId）。変更した項目だけを送る。
+ * 発表枠の編集（PATCH /api/rooms/:id/talks/:talkId）。変更した項目だけを送る。
  * 発表者・タイトルの両方が空にならないかは、今の値と合わせて EventRoom で確かめる
  */
 export function updateTalkInputSchema(limits: Limits) {
@@ -201,7 +201,7 @@ export function updateTalkInputSchema(limits: Limits) {
 export type UpdateTalkInput = v.InferInput<ReturnType<typeof updateTalkInputSchema>>;
 export type UpdateTalkData = v.InferOutput<ReturnType<typeof updateTalkInputSchema>>;
 
-/** 発表枠の並び順（PUT /api/events/:id/talks/order）。今あるすべての発表枠の ID を新しい順に並べる */
+/** 発表枠の並び順（PUT /api/rooms/:id/talks/order）。今あるすべての発表枠の ID を新しい順に並べる */
 export function reorderTalksInputSchema(limits: Limits) {
   return v.object({
     ids: v.pipe(

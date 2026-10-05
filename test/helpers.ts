@@ -12,7 +12,7 @@ export async function createEvent(): Promise<{
   ownerToken: string;
   talkIds: string[];
 }> {
-  const res = await exports.default.fetch(`${ORIGIN}/api/events/new`, {
+  const res = await exports.default.fetch(`${ORIGIN}/api/rooms`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({
@@ -25,7 +25,7 @@ export async function createEvent(): Promise<{
     }),
   });
   const { id, ownerToken } = await res.json<CreateEventResponse>();
-  const event = await exports.default.fetch(`${ORIGIN}/api/events/${id}`);
+  const event = await exports.default.fetch(`${ORIGIN}/api/rooms/${id}`);
   const { talks } = await event.json<GetEventResponse>();
   return { id, ownerToken, talkIds: talks.map((t) => t.id) };
 }
@@ -89,7 +89,7 @@ export class Client {
 
 export async function connect(eventId: string, cookie: string, since?: number): Promise<Client> {
   const query = since === undefined ? "" : `?since=${since}`;
-  const res = await upgrade(`/api/events/${eventId}/ws${query}`, { Cookie: cookie });
+  const res = await upgrade(`/api/rooms/${eventId}/ws${query}`, { Cookie: cookie });
   expect(res.status).toBe(101);
   if (!res.webSocket) throw new Error("webSocket がない");
   return new Client(res.webSocket);
@@ -120,7 +120,7 @@ export function request(
 }
 
 export function postAdminSession(id: string, token: string, origin?: string | null) {
-  return request(`/api/events/${id}/admin/session`, { method: "POST", body: { token }, origin });
+  return request(`/api/rooms/${id}/admin/session`, { method: "POST", body: { token }, origin });
 }
 
 /** 作成者トークンで管理セッションを作り、管理 Cookie（`adm=...`）を返す */

@@ -70,22 +70,22 @@ flowchart LR
 | `GET /e/:id` | 誰でも | SPA の HTML。イベント名入りの OGP を差し込む |
 | `GET /api/session` | 誰でも | 有効な参加者 Cookie があるかを返す（ないときは 401）。あれば同じ ID で出し直して有効期限を延ばす |
 | `POST /api/session` | 誰でも | Turnstile トークンを検証し、参加者 ID の Cookie を発行。有効な Cookie があれば検証せずそのまま使う |
-| `POST /api/events/new` | 誰でも（Turnstile 必須） | イベント作成。返り値に作成者トークンを一度だけ含める |
-| `GET /api/events/:id` | 誰でも | イベント情報と発表枠 |
-| `GET /api/events/:id/ws` | 参加者 Cookie | WebSocket への切り替え |
-| `POST /api/events/:id/admin/session` | 作成者・共同管理者トークン | トークンを管理セッション Cookie に入れ替える。削除済みのイベントは作成者トークンだけ通す（復元のため） |
-| `GET /api/events/:id/admin` | 管理 | 権限・イベント情報・発表枠・発表ごとのコメント数・削除の状態（管理画面の表示と、メニューに「イベントを管理する」を出すかの判定）。削除済みなら作成者にだけ返す |
-| `PATCH /api/events/:id` | 管理 | イベント情報の更新（変更した項目だけ）。コメント受付の一時停止（`commentsOpen`）もここで切り替える |
-| `POST` / `PATCH` / `DELETE /api/events/:id/talks[/:talkId]` | 管理 | 発表枠の追加・編集・削除。最後の 1 枠は削除できない（409） |
-| `PUT /api/events/:id/talks/order` | 管理 | 並び順（今あるすべての ID の配列。過不足があれば 409） |
-| `GET /api/events/:id/admin/comments` | 管理 | コメント一覧（非表示も含む、新しい順）。投稿者は `author_keys` のキーで表す |
-| `POST /api/events/:id/comments/:cid/hide`（と `unhide`） | 管理 | コメントの非表示・再表示 |
-| `POST /api/events/:id/authors/:aid/hide`（と `unhide`） | 管理 | 投稿者単位の一括非表示と、その解除（`:aid` は投稿者のキー）。解除するとその投稿者の非表示のコメントをすべて表示に戻す |
-| `GET /api/events/:id/admin-keys` | 作成者 | 共同管理者 URL の一覧（発行日・無効化日時。トークンは含めない） |
-| `POST` / `DELETE /api/events/:id/admin-keys[/:keyId]` | 作成者 | 共同管理者 URL の発行・無効化。発行時だけトークンを返す。有効な URL は上限（初期値 20）まで |
-| `DELETE /api/events/:id`（と `POST .../restore`） | 作成者 | 論理削除と復元。復元は期限（7 日）内だけで、過ぎていれば 404 |
+| `POST /api/rooms` | 誰でも（Turnstile 必須） | イベント作成。返り値に作成者トークンを一度だけ含める |
+| `GET /api/rooms/:id` | 誰でも | イベント情報と発表枠 |
+| `GET /api/rooms/:id/ws` | 参加者 Cookie | WebSocket への切り替え |
+| `POST /api/rooms/:id/admin/session` | 作成者・共同管理者トークン | トークンを管理セッション Cookie に入れ替える。削除済みのイベントは作成者トークンだけ通す（復元のため） |
+| `GET /api/rooms/:id/admin` | 管理 | 権限・イベント情報・発表枠・発表ごとのコメント数・削除の状態（管理画面の表示と、メニューに「イベントを管理する」を出すかの判定）。削除済みなら作成者にだけ返す |
+| `PATCH /api/rooms/:id` | 管理 | イベント情報の更新（変更した項目だけ）。コメント受付の一時停止（`commentsOpen`）もここで切り替える |
+| `POST` / `PATCH` / `DELETE /api/rooms/:id/talks[/:talkId]` | 管理 | 発表枠の追加・編集・削除。最後の 1 枠は削除できない（409） |
+| `PUT /api/rooms/:id/talks/order` | 管理 | 並び順（今あるすべての ID の配列。過不足があれば 409） |
+| `GET /api/rooms/:id/admin/comments` | 管理 | コメント一覧（非表示も含む、新しい順）。投稿者は `author_keys` のキーで表す |
+| `POST /api/rooms/:id/comments/:cid/hide`（と `unhide`） | 管理 | コメントの非表示・再表示 |
+| `POST /api/rooms/:id/authors/:aid/hide`（と `unhide`） | 管理 | 投稿者単位の一括非表示と、その解除（`:aid` は投稿者のキー）。解除するとその投稿者の非表示のコメントをすべて表示に戻す |
+| `GET /api/rooms/:id/admin-keys` | 作成者 | 共同管理者 URL の一覧（発行日・無効化日時。トークンは含めない） |
+| `POST` / `DELETE /api/rooms/:id/admin-keys[/:keyId]` | 作成者 | 共同管理者 URL の発行・無効化。発行時だけトークンを返す。有効な URL は上限（初期値 20）まで |
+| `DELETE /api/rooms/:id`（と `POST .../restore`） | 作成者 | 論理削除と復元。復元は期限（7 日）内だけで、過ぎていれば 404 |
 
-広告・トラッカーブロッカーのフィルタリストは URL の末尾で遮断するものが多いので、`/api/events`、`/api/event`、`/track`、`/collect`、`/beacon` などで終わるパスは使わない。イベント作成を `POST /api/events` にしていたところ、EasyPrivacy の `/api/events|$ping,~third-party` を種別の限定なしで適用するブラウザ（Dia）で遮断された（#27）。
+API のパスは、広告・トラッカーブロッカーのフィルタリストに当たらないものにする。以前は `/api/events/…` だったが、EasyPrivacy の `||workers.dev/api/event`（workers.dev 上でパスが `/api/event` で始まるリクエストをすべて遮断する）に当たり、ブロッカーを組み込んだブラウザ（Dia）ではイベントの作成・閲覧・WebSocket がすべて失敗した（#27）。`/api/event…`、`/track`、`/collect`、`/beacon` などで始まる・終わるパスは使わない。パスを変えるときは EasyPrivacy で `||workers.dev/` と、変えたパスを検索して確かめる。
 
 作成者だけの操作を共同管理者の管理セッションで呼ぶと 403 を返す。
 
@@ -138,7 +138,7 @@ flowchart LR
 - 参加者 Cookie の有効期限は 1 年。イベントページを開くたびに同じ ID で出し直して延ばすので、イベントの最中には切れない
 - Turnstile は用途ごとに action（`join`・`create_event`）を付け、Worker で一致を確かめる
 - 管理操作の HTTP は `Origin` ヘッダーを検証して CSRF を防ぐ
-- 管理セッション Cookie（`adm`）はイベント ID と管理キー ID を署名したもので、`Path=/api/events/{id}` に絞る。有効期限は 30 日で、管理画面を開くたびに延ばす。キーが無効化されていないかは EventRoom が操作のたびに確かめる
+- 管理セッション Cookie（`adm`）はイベント ID と管理キー ID を署名したもので、`Path=/api/rooms/{id}` に絞る。有効期限は 30 日で、管理画面を開くたびに延ばす。キーが無効化されていないかは EventRoom が操作のたびに確かめる
 - WebSocket 接続時も `Origin` を検証する
 - トークンの照合は定数時間比較で行う
 - CSP を設定し、外部スクリプトは Turnstile など必要なものに限る
