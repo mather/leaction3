@@ -32,6 +32,12 @@ jobs:
       CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
       CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
     steps:
+      # サイトキーなしでビルドするとトークンを送らないクライアントになり、本番の作成・入室がすべて turnstile_failed になる
+      - name: Check Turnstile site key
+        if: vars.VITE_TURNSTILE_SITE_KEY == ''
+        run: |
+          echo "::error::Environment production に Variable VITE_TURNSTILE_SITE_KEY が設定されていません"
+          exit 1
       - uses: actions/checkout@v7
       - uses: ./.github/actions/setup
       - run: pnpm db:migrate:remote
