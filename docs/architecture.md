@@ -11,12 +11,10 @@ flowchart LR
   R["EventRoom（DO）<br/>1イベント＝1インスタンス<br/>SQLite：コメント・いいね<br/>WS配信・待機中は休止"]
   T["Turnstile<br/>入室時・作成時に1回"]
   D["D1<br/>イベントの索引（events）"]
-  A["R2（後日）<br/>終了イベントのアーカイブ"]
   B -- "HTTP / WS" --> W
   W -- "転送" --> R
   B -- "トークン取得" --> T
   W -- "読み書き" --> D
-  R -. "書き出し" .-> A
 ```
 
 | 要素 | 役割 |
@@ -25,7 +23,6 @@ flowchart LR
 | EventRoom（Durable Object、SQLite） | イベントの全データ。WebSocket の受付と配信（Hibernation API）、連投上限、削除後の掃除アラーム |
 | D1 | イベントの索引。OGP 生成や ID の存在確認で、EventRoom を起こさずに済む読み取りを担う |
 | Turnstile | イベントページを開いたときと作成時に 1 回だけ |
-| R2（後日） | 終了イベントの JSON アーカイブ |
 
 開発環境は Wrangler と Vite（Cloudflare Vite プラグイン）で、DO・D1 も含めてローカルで動かす。デプロイは GitHub Actions から行い、PR ごとにプレビューを出す現行の運用を引き継ぐ。main への push で本番にデプロイし、PR はプレビュー環境（`wrangler.jsonc` の `env.preview`。Worker `leaction-preview` と D1 `leaction-preview` で本番とデータを分ける）に上書きでデプロイする。プレビュー環境は全 PR で 1 つで、Turnstile はテスト用キーを使う。手順は README の「デプロイ」を参照。
 
@@ -47,7 +44,7 @@ flowchart LR
 
 | テーブル | 主な列 | 備考 |
 | --- | --- | --- |
-| `event` | `name`, `date`, `url`, `hashtag`, `comments_open`, `live_talk_id`, `deleted_at` | 1 行のみ |
+| `event` | `name`, `date`, `url`, `hashtag`, `comments_open`, `live_talk_id`, `archive_after`, `deleted_at` | 1 行のみ。`archive_after` はアーカイブを解除したときだけ入れる |
 | `talks` | `id`, `position`, `speaker`, `title` | `position` で並べ替え |
 | `comments` | `id`, `talk_id`, `author_id`, `body`, `kind`, `hidden`, `created_at` | `kind` は将来の質問区別用、当面は `comment` 固定 |
 | `likes` | `comment_id`, `voter_id`, `created_at` | 主キーを `(comment_id, voter_id)` にして二重いいねを防ぐ |
@@ -59,6 +56,16 @@ flowchart LR
 - 発表枠を削除したときは、その発表のコメントといいねも同じトランザクションで消す
 - イベント削除は `deleted_at` を入れる論理削除とし、7 日後に DO のアラームで全データを消す。D1 の `events` も削除時に `deleted_at` を入れ、掃除のときに行ごと消す
 - 復元の日数は `LIMIT_DELETED_RETENTION_DAYS` で変えられる
+
+### アーカイブ
+
+アーカイブ済みかどうかは保存せず、読み書きのたびに計算する。DO アラームも使わない（アラームは削除後の掃除専用のまま）。
+
+- `archiveAt = max(既定のアーカイブ日時, archive_after)`。既定のアーカイブ日時は「`date` と `created_at` の日付（JST）の遅いほうの翌日 0:00 JST ＋ `LIMIT_ARCHIVE_AFTER_DAYS` 日」
+- 今が `archiveAt` 以降ならアーカイブ済み
+- 解除は `archive_after = 今 ＋ LIMIT_ARCHIVE_AFTER_DAYS 日` を入れる。`max` を取るので、解除で `archiveAt` が早まることはない
+- 計算は `src/shared/` に置き、EventRoom（書き込みの拒否）とクライアント（表示）で同じ関数を使う
+- 既存のイベントにも移行作業なしで効く
 
 ## HTTP API
 
@@ -84,6 +91,9 @@ flowchart LR
 | `GET /api/rooms/:id/admin-keys` | 作成者 | 共同管理者 URL の一覧（発行日・無効化日時。トークンは含めない） |
 | `POST` / `DELETE /api/rooms/:id/admin-keys[/:keyId]` | 作成者 | 共同管理者 URL の発行・無効化。発行時だけトークンを返す。有効な URL は上限（初期値 20）まで |
 | `DELETE /api/rooms/:id`（と `POST .../restore`） | 作成者 | 論理削除と復元。復元は期限（7 日）内だけで、過ぎていれば 404 |
+| `POST /api/rooms/:id/unarchive` | 作成者 | アーカイブの解除。アーカイブ済みでなければ 409 |
+
+`GET /api/rooms/:id` と `GET /api/rooms/:id/admin` は `archiveAt`（ミリ秒）を返す。アーカイブ済みのイベントに対するイベント情報・発表枠の編集と、コメント受付の切り替えは 409 を返す。
 
 API のパスは、広告・トラッカーブロッカーのフィルタリストに当たらないものにする。以前は `/api/events/…` だったが、EasyPrivacy の `||workers.dev/api/event`（workers.dev 上でパスが `/api/event` で始まるリクエストをすべて遮断する）に当たり、ブロッカーを組み込んだブラウザ（Dia）ではイベントの作成・閲覧・WebSocket がすべて失敗した（#27）。`/api/event…`、`/track`、`/collect`、`/beacon` などで始まる・終わるパスは使わない。パスを変えるときは EasyPrivacy で `||workers.dev/` と、変えたパスを検索して確かめる。
 
@@ -96,7 +106,7 @@ API のパスは、広告・トラッカーブロッカーのフィルタリス�
 | サーバー→ | `snapshot` | 接続直後に送る。イベント・発表枠・表示中の全コメント・いいね数・自分がいいねしたコメント |
 | サーバー→ | `comment.added` / `comment.removed` / `like.changed` | 差分。各メッセージに連番 `seq` を付ける |
 | サーバー→ | `comment.accepted` | 再送された投稿が登録済みだったとき、送った本人にだけ返す（`seq` なし） |
-| サーバー→ | `error` | `rate_limited` / `comments_closed` / `invalid_message` / `not_found`。投稿への応答なら `clientId`、いいね・削除への応答なら `commentId` を付ける |
+| サーバー→ | `error` | `rate_limited` / `comments_closed` / `archived` / `invalid_message` / `not_found`。投稿への応答なら `clientId`、いいね・削除への応答なら `commentId` を付ける |
 | サーバー→ | `event.updated` / `talks.updated` | 管理操作の反映 |
 | クライアント→ | `comment.post` | `talkId`, `body`, クライアント生成の `clientId`（二重送信防止・自分の投稿の照合） |
 | クライアント→ | `comment.delete` / `like.set` | 自分のコメントの削除、いいねの付け外し |
@@ -114,6 +124,7 @@ API のパスは、広告・トラッカーブロッカーのフィルタリス�
 - 送り直す差分は 1 件につき必ず 1 通にして `seq` を飛ばさない。その後に非表示・削除されたコメントの差分は `comment.removed` として送る
 - `event.updated` / `talks.updated` も `seq` を付けて `updates` 表に残し、送り直すときは送る時点のイベント情報・発表枠を入れる
 - 発表枠を削除したときは `talks.updated` だけを送り、クライアントは消えた発表のコメントを取り除く
+- アーカイブ済みのイベントにも今と同じく WebSocket で接続する（自分のコメントの削除と、管理者の非表示を反映するため）。`comment.post` と `like.set` は `archived` で拒否する。`snapshot` と `event.updated` には `archiveAt` を入れ、アーカイブを解除したときは `event.updated` を配信する。接続中に `archiveAt` を過ぎたときは、クライアントが自分で表示を切り替える
 - イベントを削除したときは、全接続をコード `4404` で閉じる。クライアントは再接続せず「このイベントは削除されました」を出す
 
 ## スパム対策・セキュリティ
