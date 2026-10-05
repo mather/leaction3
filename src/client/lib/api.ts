@@ -43,11 +43,11 @@ async function request<T>(path: string, init: RequestInit): Promise<T> {
 }
 
 export function createEvent(input: CreateEventRequest): Promise<CreateEventResponse> {
-  return request("/api/events/new", { method: "POST", body: JSON.stringify(input) });
+  return request("/api/rooms", { method: "POST", body: JSON.stringify(input) });
 }
 
 export function getEvent(id: string): Promise<GetEventResponse> {
-  return request(`/api/events/${encodeURIComponent(id)}`, { method: "GET" });
+  return request(`/api/rooms/${encodeURIComponent(id)}`, { method: "GET" });
 }
 
 /**
@@ -67,7 +67,7 @@ export async function ensureSession(): Promise<void> {
 
 // 管理操作。管理セッションは HttpOnly Cookie なので、ここでは扱わずブラウザに任せる
 
-const eventPath = (id: string) => `/api/events/${encodeURIComponent(id)}`;
+const eventPath = (id: string) => `/api/rooms/${encodeURIComponent(id)}`;
 const talkPath = (id: string, talkId: string) =>
   `${eventPath(id)}/talks/${encodeURIComponent(talkId)}`;
 

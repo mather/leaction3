@@ -17,14 +17,14 @@ const validInput = {
 };
 
 function postEvent(body: unknown) {
-  return exports.default.fetch("http://example.com/api/events/new", {
+  return exports.default.fetch("http://example.com/api/rooms", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(body),
   });
 }
 
-describe("POST /api/events/new", () => {
+describe("POST /api/rooms", () => {
   it("D1 と EventRoom に保存し、作成者トークンを返す", async () => {
     const res = await postEvent(validInput);
     expect(res.status).toBe(201);
@@ -58,13 +58,15 @@ describe("POST /api/events/new", () => {
     ]);
   });
 
-  it("URL が /api/events で終わる旧パスでは作成しない（コンテンツブロッカーに遮断されるため）", async () => {
-    const res = await exports.default.fetch("http://example.com/api/events", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(validInput),
-    });
-    expect(res.status).toBe(404);
+  it("旧パス /api/events/… では受け付けない（workers.dev ではコンテンツブロッカーに遮断されるため）", async () => {
+    for (const path of ["/api/events", "/api/events/new"]) {
+      const res = await exports.default.fetch(`http://example.com${path}`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(validInput),
+      });
+      expect(res.status).toBe(404);
+    }
   });
 
   it("作成ごとに別の ID とトークンを発行する", async () => {

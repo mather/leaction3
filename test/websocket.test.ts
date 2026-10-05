@@ -4,10 +4,10 @@ import { describe, expect, it } from "vitest";
 import { DEFAULT_LIMITS } from "../src/shared/schema";
 import { Client, connect, createEvent, expectType, ORIGIN, participant, upgrade } from "./helpers";
 
-describe("GET /api/events/:id/ws の検証", () => {
+describe("GET /api/rooms/:id/ws の検証", () => {
   it("WebSocket でなければ 426", async () => {
     const { id } = await createEvent();
-    const res = await exports.default.fetch(`${ORIGIN}/api/events/${id}/ws`, {
+    const res = await exports.default.fetch(`${ORIGIN}/api/rooms/${id}/ws`, {
       headers: { Cookie: await participant() },
     });
     expect(res.status).toBe(426);
@@ -17,18 +17,18 @@ describe("GET /api/events/:id/ws の検証", () => {
     const { id } = await createEvent();
     const cookie = await participant();
     for (const origin of ["https://evil.example", ""]) {
-      const res = await upgrade(`/api/events/${id}/ws`, { Cookie: cookie, Origin: origin });
+      const res = await upgrade(`/api/rooms/${id}/ws`, { Cookie: cookie, Origin: origin });
       expect(res.status).toBe(403);
     }
   });
 
   it("参加者 Cookie がなければ 401", async () => {
     const { id } = await createEvent();
-    expect((await upgrade(`/api/events/${id}/ws`, {})).status).toBe(401);
+    expect((await upgrade(`/api/rooms/${id}/ws`, {})).status).toBe(401);
   });
 
   it("イベントがなければ 404", async () => {
-    const res = await upgrade("/api/events/nothere1/ws", { Cookie: await participant() });
+    const res = await upgrade("/api/rooms/nothere1/ws", { Cookie: await participant() });
     expect(res.status).toBe(404);
   });
 });
@@ -361,7 +361,7 @@ describe("再接続（?since=）", () => {
     ["不正な値", "abc"],
   ])("%s なら snapshot", async (_, since) => {
     const { id, cookie } = await setup(1);
-    const res = await upgrade(`/api/events/${id}/ws?since=${since}`, { Cookie: cookie });
+    const res = await upgrade(`/api/rooms/${id}/ws?since=${since}`, { Cookie: cookie });
     if (!res.webSocket) throw new Error("webSocket がない");
     const snapshot = await expectType(new Client(res.webSocket), "snapshot");
     expect(snapshot.seq).toBe(1);
@@ -379,7 +379,7 @@ describe("再接続（?since=）", () => {
 
 it("ping には pong を返す", async () => {
   const { id } = await createEvent();
-  const res = await upgrade(`/api/events/${id}/ws`, { Cookie: await participant() });
+  const res = await upgrade(`/api/rooms/${id}/ws`, { Cookie: await participant() });
   const ws = res.webSocket;
   if (!ws) throw new Error("webSocket がない");
   const pong = new Promise<unknown>((resolve) => {

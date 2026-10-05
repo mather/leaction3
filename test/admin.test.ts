@@ -18,7 +18,7 @@ import {
   setupAdmin as setup,
 } from "./helpers";
 
-describe("POST /api/events/:id/admin/session", () => {
+describe("POST /api/rooms/:id/admin/session", () => {
   it("作成者トークンを、そのイベントの API に絞った HttpOnly Cookie に入れ替える", async () => {
     const { id, ownerToken } = await createEvent();
     const res = await postAdminSession(id, ownerToken);
@@ -28,7 +28,7 @@ describe("POST /api/events/:id/admin/session", () => {
     expect(header).toMatch(/^adm=[^;]+;/);
     // Cookie にトークンそのものは入れない
     expect(header).not.toContain(ownerToken);
-    expect(header).toContain(`Path=/api/events/${id}`);
+    expect(header).toContain(`Path=/api/rooms/${id}`);
     expect(header).toContain("HttpOnly");
     expect(header).toContain("Secure");
     expect(header).toContain("SameSite=Lax");
@@ -60,7 +60,7 @@ describe("POST /api/events/:id/admin/session", () => {
   });
 });
 
-describe("GET /api/events/:id/admin", () => {
+describe("GET /api/rooms/:id/admin", () => {
   it("権限・イベント情報・発表枠・発表ごとのコメント数を返す", async () => {
     const { id, talkIds, cookie } = await setup();
     const [talk] = talkIds as [string];
@@ -69,7 +69,7 @@ describe("GET /api/events/:id/admin", () => {
     ws.post(talk, "こんにちは");
     await expectType(ws, "comment.added");
 
-    const res = await request(`/api/events/${id}/admin`, { cookie });
+    const res = await request(`/api/rooms/${id}/admin`, { cookie });
     expect(res.status).toBe(200);
     const body = await res.json<GetAdminResponse>();
     expect(body.role).toBe("owner");
@@ -80,13 +80,13 @@ describe("GET /api/events/:id/admin", () => {
 
   it("管理 Cookie がなければ 401", async () => {
     const { id } = await createEvent();
-    expect((await request(`/api/events/${id}/admin`)).status).toBe(401);
+    expect((await request(`/api/rooms/${id}/admin`)).status).toBe(401);
   });
 
   it("別のイベントの管理 Cookie は使えない", async () => {
     const a = await setup();
     const b = await createEvent();
-    expect((await request(`/api/events/${b.id}/admin`, { cookie: a.cookie })).status).toBe(401);
+    expect((await request(`/api/rooms/${b.id}/admin`, { cookie: a.cookie })).status).toBe(401);
   });
 
   it("管理キーが無効化されたら 401 にして Cookie を消す", async () => {
@@ -94,19 +94,19 @@ describe("GET /api/events/:id/admin", () => {
     await runInDurableObject(env.EVENT_ROOM.getByName(id), (_, state) => {
       state.storage.sql.exec("UPDATE admin_keys SET revoked_at = 1");
     });
-    const res = await request(`/api/events/${id}/admin`, { cookie });
+    const res = await request(`/api/rooms/${id}/admin`, { cookie });
     expect(res.status).toBe(401);
     expect(res.headers.get("Set-Cookie")).toMatch(/^adm=;/);
   });
 });
 
-describe("PATCH /api/events/:id", () => {
+describe("PATCH /api/rooms/:id", () => {
   it("変更した項目だけを更新し、D1 の索引と参加者の画面に反映する", async () => {
     const { id, cookie } = await setup();
     const ws = await connect(id, await participant());
     await expectType(ws, "snapshot");
 
-    const res = await request(`/api/events/${id}`, {
+    const res = await request(`/api/rooms/${id}`, {
       method: "PATCH",
       cookie,
       body: { name: " 新しい名前 ", hashtag: "#newtag" },
@@ -126,12 +126,12 @@ describe("PATCH /api/events/:id", () => {
 
   it("空文字で URL・ハッシュタグを消せる", async () => {
     const { id, cookie } = await setup();
-    await request(`/api/events/${id}`, {
+    await request(`/api/rooms/${id}`, {
       method: "PATCH",
       cookie,
       body: { url: "https://example.com", hashtag: "tag" },
     });
-    const res = await request(`/api/events/${id}`, {
+    const res = await request(`/api/rooms/${id}`, {
       method: "PATCH",
       cookie,
       body: { url: "", hashtag: null },
@@ -149,14 +149,14 @@ describe("PATCH /api/events/:id", () => {
     ["受付の切り替えが真偽値でない", { commentsOpen: "no" }],
   ])("入力が不正なら 400（%s）", async (_, body) => {
     const { id, cookie } = await setup();
-    const res = await request(`/api/events/${id}`, { method: "PATCH", cookie, body });
+    const res = await request(`/api/rooms/${id}`, { method: "PATCH", cookie, body });
     expect(res.status).toBe(400);
   });
 
   it("Origin が違えば 403（CSRF 対策）", async () => {
     const { id, cookie } = await setup();
     for (const origin of ["https://evil.example", null]) {
-      const res = await request(`/api/events/${id}`, {
+      const res = await request(`/api/rooms/${id}`, {
         method: "PATCH",
         cookie,
         origin,
@@ -169,7 +169,7 @@ describe("PATCH /api/events/:id", () => {
   it("管理 Cookie がなければ 401", async () => {
     const { id } = await createEvent();
     const cookie = await participant();
-    const res = await request(`/api/events/${id}`, {
+    const res = await request(`/api/rooms/${id}`, {
       method: "PATCH",
       cookie,
       body: { name: "x" },
@@ -184,7 +184,7 @@ describe("発表枠の管理", () => {
     const ws = await connect(id, await participant());
     await expectType(ws, "snapshot");
 
-    const res = await request(`/api/events/${id}/talks`, {
+    const res = await request(`/api/rooms/${id}/talks`, {
       method: "POST",
       cookie,
       body: { speaker: " 鈴木 ", title: "" },
@@ -198,7 +198,7 @@ describe("発表枠の管理", () => {
 
   it("発表者もタイトルも空なら追加できない", async () => {
     const { id, cookie } = await setup();
-    const res = await request(`/api/events/${id}/talks`, {
+    const res = await request(`/api/rooms/${id}/talks`, {
       method: "POST",
       cookie,
       body: { speaker: "", title: " " },
@@ -209,7 +209,7 @@ describe("発表枠の管理", () => {
   it("PATCH で変更した項目だけを編集する", async () => {
     const { id, talkIds, cookie } = await setup();
     const [talk] = talkIds as [string];
-    const res = await request(`/api/events/${id}/talks/${talk}`, {
+    const res = await request(`/api/rooms/${id}/talks/${talk}`, {
       method: "PATCH",
       cookie,
       body: { title: "Solid 2.0" },
@@ -223,7 +223,7 @@ describe("発表枠の管理", () => {
     const { id, talkIds, cookie } = await setup();
     // 2 番目は発表者だけの枠（タイトルは空）
     const talk = talkIds[1] as string;
-    const res = await request(`/api/events/${id}/talks/${talk}`, {
+    const res = await request(`/api/rooms/${id}/talks/${talk}`, {
       method: "PATCH",
       cookie,
       body: { speaker: "" },
@@ -233,14 +233,14 @@ describe("発表枠の管理", () => {
 
   it("存在しない発表枠は 404", async () => {
     const { id, cookie } = await setup();
-    const res = await request(`/api/events/${id}/talks/nothere1`, {
+    const res = await request(`/api/rooms/${id}/talks/nothere1`, {
       method: "PATCH",
       cookie,
       body: { title: "x" },
     });
     expect(res.status).toBe(404);
     expect(
-      (await request(`/api/events/${id}/talks/nothere1`, { method: "DELETE", cookie })).status,
+      (await request(`/api/rooms/${id}/talks/nothere1`, { method: "DELETE", cookie })).status,
     ).toBe(404);
   });
 
@@ -260,7 +260,7 @@ describe("発表枠の管理", () => {
     bob.send({ type: "like.set", commentId: removed.comment.id, liked: true });
     await expectType(alice, "like.changed");
 
-    const res = await request(`/api/events/${id}/talks/${first}`, { method: "DELETE", cookie });
+    const res = await request(`/api/rooms/${id}/talks/${first}`, { method: "DELETE", cookie });
     expect(res.status).toBe(200);
     const { talks } = await res.json<TalksResponse>();
     expect(talks.map((t) => t.id)).toEqual([second]);
@@ -276,15 +276,15 @@ describe("発表枠の管理", () => {
   it("最後の 1 枠は削除できない", async () => {
     const { id, talkIds, cookie } = await setup();
     const [first, second] = talkIds as [string, string];
-    await request(`/api/events/${id}/talks/${first}`, { method: "DELETE", cookie });
-    const res = await request(`/api/events/${id}/talks/${second}`, { method: "DELETE", cookie });
+    await request(`/api/rooms/${id}/talks/${first}`, { method: "DELETE", cookie });
+    const res = await request(`/api/rooms/${id}/talks/${second}`, { method: "DELETE", cookie });
     expect(res.status).toBe(409);
   });
 
   it("PUT /talks/order で並べ替える", async () => {
     const { id, talkIds, cookie } = await setup();
     const reversed = [...talkIds].reverse();
-    const res = await request(`/api/events/${id}/talks/order`, {
+    const res = await request(`/api/rooms/${id}/talks/order`, {
       method: "PUT",
       cookie,
       body: { ids: reversed },
@@ -292,7 +292,7 @@ describe("発表枠の管理", () => {
     expect(res.status).toBe(200);
     expect((await res.json<TalksResponse>()).talks.map((t) => t.id)).toEqual(reversed);
 
-    const event = await exports.default.fetch(`${ORIGIN}/api/events/${id}`);
+    const event = await exports.default.fetch(`${ORIGIN}/api/rooms/${id}`);
     const { talks } = await event.json<TalksResponse>();
     expect(talks.map((t) => t.id)).toEqual(reversed);
   });
@@ -303,7 +303,7 @@ describe("発表枠の管理", () => {
     ["知らない ID がある", (ids: string[]) => [ids[0], "nothere1"]],
   ])("並べ替えの ID が今の発表枠と合わなければ 409（%s）", async (_, make) => {
     const { id, talkIds, cookie } = await setup();
-    const res = await request(`/api/events/${id}/talks/order`, {
+    const res = await request(`/api/rooms/${id}/talks/order`, {
       method: "PUT",
       cookie,
       body: { ids: make(talkIds) },
@@ -313,7 +313,7 @@ describe("発表枠の管理", () => {
 
   it("Origin が違えば 403（CSRF 対策）", async () => {
     const { id, talkIds, cookie } = await setup();
-    const res = await request(`/api/events/${id}/talks/${talkIds[0]}`, {
+    const res = await request(`/api/rooms/${id}/talks/${talkIds[0]}`, {
       method: "DELETE",
       cookie,
       origin: "https://evil.example",
@@ -325,13 +325,13 @@ describe("発表枠の管理", () => {
 describe("再接続時の補完", () => {
   it("取りこぼした event.updated・talks.updated を今の内容で送り直す", async () => {
     const { id, talkIds, cookie } = await setup();
-    await request(`/api/events/${id}`, { method: "PATCH", cookie, body: { name: "古い名前" } });
-    await request(`/api/events/${id}/talks/order`, {
+    await request(`/api/rooms/${id}`, { method: "PATCH", cookie, body: { name: "古い名前" } });
+    await request(`/api/rooms/${id}/talks/order`, {
       method: "PUT",
       cookie,
       body: { ids: [...talkIds].reverse() },
     });
-    await request(`/api/events/${id}`, { method: "PATCH", cookie, body: { name: "今の名前" } });
+    await request(`/api/rooms/${id}`, { method: "PATCH", cookie, body: { name: "今の名前" } });
 
     const ws = await connect(id, await participant(), 0);
     const first = await expectType(ws, "event.updated");

@@ -22,7 +22,7 @@ export type {
   UpdateTalkInput as UpdateTalkRequest,
 } from "./schema";
 
-/** GET /api/events/:id。コメントは WebSocket の snapshot で受け取る */
+/** GET /api/rooms/:id。コメントは WebSocket の snapshot で受け取る */
 export type GetEventResponse = {
   event: EventInfo;
   /** 並び順 */
@@ -46,12 +46,12 @@ export type SessionResponse = {
 /** 管理者の権限。作成者（owner）と共同管理者（manager） */
 export type AdminRole = "owner" | "manager";
 
-/** POST /api/events/:id/admin/session */
+/** POST /api/rooms/:id/admin/session */
 export type AdminSessionResponse = {
   role: AdminRole;
 };
 
-/** GET /api/events/:id/admin。管理画面の表示に使う */
+/** GET /api/rooms/:id/admin。管理画面の表示に使う */
 export type GetAdminResponse = {
   role: AdminRole;
   event: EventInfo;
@@ -70,7 +70,7 @@ export type EventDeletion = {
   restorableUntil: number;
 };
 
-/** DELETE /api/events/:id */
+/** DELETE /api/rooms/:id */
 export type DeleteEventResponse = {
   deletion: EventDeletion;
 };
@@ -84,19 +84,19 @@ export type AdminKey = {
   revokedAt: number | null;
 };
 
-/** GET /api/events/:id/admin-keys と、無効化の結果。共同管理者 URL の一覧（新しい順） */
+/** GET /api/rooms/:id/admin-keys と、無効化の結果。共同管理者 URL の一覧（新しい順） */
 export type AdminKeysResponse = {
   keys: AdminKey[];
 };
 
-/** POST /api/events/:id/admin-keys */
+/** POST /api/rooms/:id/admin-keys */
 export type CreateAdminKeyResponse = {
   key: AdminKey;
   /** 共同管理者トークン。ハッシュしか保存しないため、このレスポンスでしか受け取れない */
   token: string;
 };
 
-/** PATCH /api/events/:id */
+/** PATCH /api/rooms/:id */
 export type UpdateEventResponse = {
   event: EventInfo;
 };
@@ -124,7 +124,7 @@ export type AdminComment = {
   authorHidden: boolean;
 };
 
-/** GET /api/events/:id/admin/comments とモデレーション操作の結果。新しい順 */
+/** GET /api/rooms/:id/admin/comments とモデレーション操作の結果。新しい順 */
 export type AdminCommentsResponse = {
   comments: AdminComment[];
 };
