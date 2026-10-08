@@ -2,6 +2,7 @@ import { A } from "@solidjs/router";
 import { For } from "solid-js";
 import button from "../components/button.module.css";
 import { Icon, type IconName } from "../components/Icon";
+import { track, trackView } from "../lib/analytics";
 import styles from "./Top.module.css";
 
 const REPOSITORY_URL = "https://github.com/mather/leaction3";
@@ -54,22 +55,27 @@ const FAQ: { q: string; a: string }[] = [
   },
 ];
 
-function CreateButton() {
+function CreateButton(props: { target: "top_create_hero" | "top_create_bottom" }) {
   return (
-    <A href="/new" class={`${button.primary} ${button.block}`}>
+    <A
+      href="/new"
+      class={`${button.primary} ${button.block}`}
+      onClick={() => track({ name: "click", page: "top", eventId: "", target: props.target })}
+    >
       イベントを作る
     </A>
   );
 }
 
 export function Top() {
+  trackView("top");
   return (
     <div class={styles.page}>
       <header class={styles.hero}>
         <p class={styles.logo}>LeacTion!</p>
         <h1 class={styles.catch}>発表に、その場でひとこと。</h1>
         <p class={styles.lead}>{LEAD}</p>
-        <CreateButton />
+        <CreateButton target="top_create_hero" />
         <p class={styles.note}>無料・アカウント登録なしで作れます</p>
       </header>
 
@@ -132,7 +138,7 @@ export function Top() {
         </section>
 
         <section class={styles.section}>
-          <CreateButton />
+          <CreateButton target="top_create_bottom" />
         </section>
       </main>
 

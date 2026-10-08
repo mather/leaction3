@@ -3,6 +3,8 @@ import { createEffect, createSignal, onCleanup } from "solid-js";
 import button from "../components/button.module.css";
 import { Icon } from "../components/Icon";
 import { UrlField } from "../components/UrlField";
+import { trackView } from "../lib/analytics";
+import { withSource } from "../lib/traffic";
 import { eventUrl, manageUrl } from "../lib/urls";
 import styles from "./Created.module.css";
 
@@ -14,6 +16,9 @@ export function Created(props: { id: string; ownerToken: string; name: string })
   const navigate = useNavigate();
   const [saved, setSaved] = createSignal(false);
   const ownerUrl = () => manageUrl(props.id, props.ownerToken);
+  // 主催者が告知ページやスライドに載せる URL。経路が分かるよう ?src=host を付ける
+  const participantUrl = () => withSource(eventUrl(props.id), "host");
+  trackView("created", props.id);
 
   const mailto = () => {
     const subject = `【LeacTion!】${props.name} の作成者用 URL`;
@@ -22,7 +27,7 @@ export function Created(props: { id: string; ownerToken: string; name: string })
       "この URL をなくすと管理できなくなります。他の人には共有しないでください。",
       "",
       `作成者用 URL: ${ownerUrl()}`,
-      `参加者用 URL: ${eventUrl(props.id)}`,
+      `参加者用 URL: ${participantUrl()}`,
     ].join("\n");
     return `mailto:?subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(body)}`;
   };
@@ -52,7 +57,7 @@ export function Created(props: { id: string; ownerToken: string; name: string })
       <section class={styles.card}>
         <h2 class={styles.sectionTitle}>参加者用 URL</h2>
         <p class={styles.hint}>会場や SNS で共有してください。</p>
-        <UrlField label="参加者用 URL" url={eventUrl(props.id)} />
+        <UrlField label="参加者用 URL" url={participantUrl()} />
       </section>
 
       <section class={`${styles.card} ${styles.warnCard}`}>
