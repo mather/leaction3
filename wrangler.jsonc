@@ -23,9 +23,11 @@
     "bindings": [{ "name": "EVENT_ROOM", "class_name": "EventRoom" }]
   },
   "migrations": [{ "tag": "v1", "new_sqlite_classes": ["EventRoom"] }],
+  // アクセス解析（docs/analytics.md）。データセットは最初の書き込みで作られる
+  "analytics_engine_datasets": [{ "binding": "ANALYTICS", "dataset": "leaction_analytics" }],
   // PR のプレビュー用環境（Worker 名は leaction-preview）。D1 と DO を本番と分ける。
   // ビルド時に CLOUDFLARE_ENV=preview を渡して選ぶ（pnpm deploy:preview）。
-  // d1_databases・durable_objects は継承されないので、ここにも書く。
+  // d1_databases・durable_objects・analytics_engine_datasets は継承されないので、ここにも書く。
   // シークレットは `wrangler secret put <名前> --env preview` で別に設定する。
   "env": {
     "preview": {
@@ -39,7 +41,10 @@
       ],
       "durable_objects": {
         "bindings": [{ "name": "EVENT_ROOM", "class_name": "EventRoom" }]
-      }
+      },
+      "analytics_engine_datasets": [
+        { "binding": "ANALYTICS", "dataset": "leaction_analytics_preview" }
+      ]
     }
   }
 }

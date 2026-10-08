@@ -26,6 +26,7 @@ import button from "../components/button.module.css";
 import { Icon } from "../components/Icon";
 import { Sheet } from "../components/Sheet";
 import { UrlField } from "../components/UrlField";
+import { trackView } from "../lib/analytics";
 import {
   ApiError,
   addTalk,
@@ -68,6 +69,7 @@ async function loadAdmin(id: string, token: string | null): Promise<GetAdminResp
 
 export function Manage() {
   const params = useParams<{ id: string }>();
+  trackView("manage", params.id);
   // 入れ替えに成功するまではトークンを手元に残し、再試行に使う
   let token = takeTokenFromHash();
   const [data, { refetch, mutate }] = createResource(
