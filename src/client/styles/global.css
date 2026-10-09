@@ -32,6 +32,18 @@ html {
   -webkit-text-size-adjust: 100%;
 }
 
+/* iOS Safari の日付入力は固有の最小幅と中央寄せを持ち、width: 100% でも枠からはみ出す */
+input[type="date"] {
+  -webkit-appearance: none;
+  appearance: none;
+  min-width: 0;
+}
+
+input[type="date"]::-webkit-date-and-time-value {
+  min-height: 1lh;
+  text-align: left;
+}
+
 body {
   margin: 0;
   background: var(--bg);
