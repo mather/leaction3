@@ -135,6 +135,8 @@ export function createEventInputSchema(limits: Limits) {
       v.maxLength(limits.talksMaxCount),
     ),
     turnstileToken: v.optional(v.string()),
+    /** アクセス解析用の作成者の初回接触。壊れていても作成は通すので、検証は Worker で別に行う */
+    visitor: v.optional(v.unknown()),
   });
 }
 
@@ -249,3 +251,73 @@ export function clientMessageSchema(limits: Limits) {
     v.object({ type: v.literal("like.set"), commentId: id, liked: v.boolean() }),
   ]);
 }
+
+// アクセス解析（docs/analytics.md）。計測は送る側（ブラウザ）を信用できないので、値の種類と長さを絞る
+
+/** 流入元。`?src=` で受け付けるのは SHARE_SOURCES だけで、残りはリファラから決める */
+export const SHARE_SOURCES = ["qr", "link", "x", "share", "host"] as const;
+export const TRAFFIC_SOURCES = [
+  ...SHARE_SOURCES,
+  "search",
+  "referral",
+  "internal",
+  "direct",
+  "other",
+] as const;
+export type TrafficSource = (typeof TRAFFIC_SOURCES)[number];
+
+/** 画面。入口（entry）にも使う */
+export const ANALYTICS_PAGES = ["top", "event", "new", "created", "manage", "other"] as const;
+export type AnalyticsPage = (typeof ANALYTICS_PAGES)[number];
+
+/** 1 回の送信に含められる計測の件数 */
+export const FOOTPRINTS_MAX_ITEMS = 20;
+
+/** ブラウザごとの匿名 ID と初回接触。localStorage に保存したものを計測のたびに添える */
+export const VisitorSchema = v.object({
+  anon: v.pipe(v.string(), v.regex(/^[A-Za-z0-9-]{8,64}$/)),
+  src: v.picklist(TRAFFIC_SOURCES),
+  entry: v.picklist(ANALYTICS_PAGES),
+  ref: v.pipe(v.string(), v.maxLength(253)),
+  eventId: v.union([v.literal(""), EventIdSchema]),
+  /** 初回接触の時刻（ミリ秒） */
+  at: v.pipe(v.number(), v.integer(), v.minValue(0)),
+  /** 観客として初めて他人のイベントページを開いた時刻。まだなら null */
+  joinedAt: v.nullable(v.pipe(v.number(), v.integer(), v.minValue(0))),
+  /** このブラウザで作ったイベント数 */
+  created: v.pipe(v.number(), v.integer(), v.minValue(0)),
+});
+
+export type Visitor = v.InferOutput<typeof VisitorSchema>;
+
+const footprintBase = {
+  page: v.picklist(ANALYTICS_PAGES),
+  eventId: v.union([v.literal(""), EventIdSchema]),
+  /** 今回の訪問の流入元 */
+  src: v.picklist(TRAFFIC_SOURCES),
+};
+
+/** 計測 1 件。種類ごとに対象（target）の値を絞る */
+export const FootprintSchema = v.variant("name", [
+  v.object({ name: v.picklist(["view", "comment", "like"]), ...footprintBase }),
+  v.object({
+    name: v.literal("click"),
+    ...footprintBase,
+    target: v.picklist(["top_create_hero", "top_create_bottom", "event_menu_top"]),
+  }),
+  v.object({
+    name: v.literal("share"),
+    ...footprintBase,
+    target: v.picklist(["qr", "link", "x", "share"]),
+  }),
+]);
+
+export type Footprint = v.InferOutput<typeof FootprintSchema>;
+
+/** POST /api/footprints */
+export const footprintsInputSchema = v.object({
+  visitor: VisitorSchema,
+  items: v.pipe(v.array(FootprintSchema), v.minLength(1), v.maxLength(FOOTPRINTS_MAX_ITEMS)),
+});
+
+export type FootprintsInput = v.InferInput<typeof footprintsInputSchema>;

@@ -4,7 +4,13 @@ import { Icon } from "./Icon";
 import styles from "./UrlField.module.css";
 
 /** 読み取り専用の URL 表示欄とコピーボタン。label は見出しと重なるので読み上げ用にだけ使う。 */
-export function UrlField(props: { label: string; url: string; children?: JSX.Element }) {
+export function UrlField(props: {
+  label: string;
+  url: string;
+  /** コピーできたとき（アクセス解析用） */
+  onCopy?: () => void;
+  children?: JSX.Element;
+}) {
   let input: HTMLInputElement | undefined;
   const [copied, setCopied] = createSignal(false);
   let timer: ReturnType<typeof setTimeout> | undefined;
@@ -19,6 +25,7 @@ export function UrlField(props: { label: string; url: string; children?: JSX.Ele
       return;
     }
     setCopied(true);
+    props.onCopy?.();
     clearTimeout(timer);
     timer = setTimeout(() => setCopied(false), 2000);
   }

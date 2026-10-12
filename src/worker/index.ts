@@ -22,12 +22,14 @@ import {
   createEventInputSchema,
   createSessionInputSchema,
   EventIdSchema,
+  footprintsInputSchema,
   reorderTalksInputSchema,
   resolveLimits,
   talkInputSchema,
   updateEventInputSchema,
   updateTalkInputSchema,
 } from "../shared/schema";
+import { recordCreation, writeFootprints } from "./analytics";
 import {
   clearAdminCookie,
   cookieSecret,
@@ -169,7 +171,7 @@ api.post("/rooms", async (c) => {
   const body = await c.req.json<unknown>().catch(() => undefined);
   const parsed = v.safeParse(createEventInputSchema(resolveLimits(c.env)), body);
   if (!parsed.success) return c.json<ErrorResponse>({ error: "invalid_input" }, 400);
-  const { turnstileToken, ...event } = parsed.output;
+  const { turnstileToken, visitor, ...event } = parsed.output;
 
   const ip = c.req.header("CF-Connecting-IP");
   if (!(await verifyTurnstile(c.env, turnstileToken, ip, "create_event"))) {
@@ -181,7 +183,14 @@ api.post("/rooms", async (c) => {
   for (let i = 0; i < MAX_ID_ATTEMPTS; i++) {
     const id = randomId();
     const result = await c.env.EVENT_ROOM.getByName(id).initialize({ id, event, ownerTokenHash });
-    if (result.ok) return c.json<CreateEventResponse>({ id, ownerToken }, 201);
+    if (!result.ok) continue;
+    try {
+      await recordCreation(c.env, c.req.raw, id, visitor);
+    } catch (err) {
+      // 計測の失敗で作成を失敗させない
+      console.error("recordCreation failed", err);
+    }
+    return c.json<CreateEventResponse>({ id, ownerToken }, 201);
   }
   return c.json<ErrorResponse>({ error: "id_exhausted" }, 500);
 });
@@ -344,6 +353,21 @@ api.delete("/rooms/:id", requireAdmin, async (c) => {
 api.post("/rooms/:id/restore", requireAdmin, async (c) => {
   const result = await c.env.EVENT_ROOM.getByName(c.req.param("id")).restoreEvent(c.var.keyId);
   return adminResponse(c, result, (value): GetAdminResponse => value);
+});
+
+// アクセス解析（docs/analytics.md）。ブラウザでためた計測をまとめて受け取る。
+// 計測のために画面を待たせたりエラーを出したりしないよう、不正なものも含めて常に 204 を返して捨てる
+api.post("/footprints", async (c) => {
+  if (!isSameOrigin(c)) return c.body(null, 204);
+  const input = await parseBody(c, footprintsInputSchema);
+  if (input) {
+    try {
+      writeFootprints(c.env, c.req.raw, input.visitor, input.items);
+    } catch (err) {
+      console.error("writeFootprints failed", err);
+    }
+  }
+  return c.body(null, 204);
 });
 
 api.all("*", (c) => c.json<ErrorResponse>({ error: "not_found" }, 404));

@@ -9,6 +9,7 @@ LeacTion! を Cloudflare 上に再実装するプロジェクト。LT・勉強�
 | `docs/requirements.md` | 背景、機能・非機能要件、MVP の範囲、権限モデル |
 | `docs/architecture.md` | 構成、データモデル、HTTP API、WebSocket プロトコル、セキュリティ |
 | `docs/ui.md` | 画面一覧、操作仕様、デザイントークン |
+| `docs/analytics.md` | アクセス解析（流入の識別、匿名 ID、計測データのスキーマ、集計 SQL） |
 
 ## 技術スタック
 
@@ -36,6 +37,7 @@ src/
     event-room.ts    Durable Object「EventRoom」
     auth.ts          Cookie 署名、トークンのハッシュ化・照合
     turnstile.ts
+    analytics.ts     計測の書き込み（Analytics Engine、D1 の event_creations）
   shared/
     api.ts           HTTP API の型（クライアント・サーバー共用）
     protocol.ts      WebSocket メッセージ型（クライアント・サーバー共用）

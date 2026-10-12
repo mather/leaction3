@@ -20,12 +20,14 @@ import { Icon } from "../components/Icon";
 import { QrCode } from "../components/QrCode";
 import { Sheet } from "../components/Sheet";
 import { UrlField } from "../components/UrlField";
+import { markJoined, track, trackView } from "../lib/analytics";
 import { ApiError, ensureSession, getAdmin, getEvent } from "../lib/api";
 import { loadLastViewedTalk, saveLastViewedTalk } from "../lib/last-talk";
 import { useLeaveGuard } from "../lib/leave-guard";
 import { createRoom, type RoomError } from "../lib/room";
 import { xPostUrl } from "../lib/share";
 import { commentPlaceholder, pickInitialTalk, talkLabel } from "../lib/talks";
+import { withSource } from "../lib/traffic";
 import { eventUrl } from "../lib/urls";
 import styles from "./EventPage.module.css";
 
@@ -78,6 +80,9 @@ const timeFormat = new Intl.DateTimeFormat("ja-JP", { hour: "2-digit", minute: "
 function EventView(props: { data: GetEventResponse }) {
   // 開いたときに参加者 Cookie を用意する（必要なときだけ Turnstile を 1 回通す）
   const [session, { refetch: retrySession }] = createResource(ensureSession);
+  const eventId = props.data.event.id;
+  markJoined(eventId);
+  trackView("event", eventId);
 
   const [notice, setNotice] = createSignal<string>();
   let noticeTimer: ReturnType<typeof setTimeout> | undefined;
@@ -236,6 +241,7 @@ function EventView(props: { data: GetEventResponse }) {
     const t = talk();
     if (!t || !canSend()) return;
     room.post(t.id, draft().trim());
+    track({ name: "comment", page: "event", eventId });
     setDraft("");
   };
   const placeholder = () => {
@@ -261,7 +267,10 @@ function EventView(props: { data: GetEventResponse }) {
             type="button"
             class={styles.iconButton}
             aria-label="共有"
-            onClick={() => setSheet("share")}
+            onClick={() => {
+              setSheet("share");
+              track({ name: "share", page: "event", eventId, target: "qr" });
+            }}
           >
             <Icon name="share" />
           </button>
@@ -335,7 +344,11 @@ function EventView(props: { data: GetEventResponse }) {
                       comment={c}
                       connected={connected()}
                       onOpenUrl={confirmUrl}
-                      onLike={(liked) => room.like(c.id, liked)}
+                      onLike={(liked) => {
+                        if (room.like(c.id, liked) && liked) {
+                          track({ name: "like", page: "event", eventId });
+                        }
+                      }}
                       onDelete={() => confirmDelete(c)}
                     />
                   )}
@@ -461,7 +474,15 @@ function EventView(props: { data: GetEventResponse }) {
 
         <Sheet open={sheet() === "menu"} onClose={closeSheet} title="メニュー">
           {/* 外へ出る導線は新しいタブで開き、イベントページを残す */}
-          <a class={styles.menuItem} href="/" target="_blank" rel="noopener">
+          <a
+            class={styles.menuItem}
+            href="/"
+            target="_blank"
+            rel="noopener"
+            onClick={() =>
+              track({ name: "click", page: "event", eventId, target: "event_menu_top" })
+            }
+          >
             LeacTion! について・イベントを作る
             <Icon name="external" />
           </a>
@@ -521,12 +542,16 @@ function EventView(props: { data: GetEventResponse }) {
 
 /** 共有シートの中身。会場で映して読み取れるよう QR を大きめに出す */
 function ShareContent(props: { event: EventInfo }) {
+  // 経路ごとに ?src= を付け、どの手段で配られた URL から来たかを分かるようにする（docs/analytics.md）
   const url = () => eventUrl(props.event.id);
+  const trackShare = (target: "link" | "x" | "share") =>
+    track({ name: "share", page: "event", eventId: props.event.id, target });
   // Web Share API に対応したブラウザ（主にスマホ）でだけ「他のアプリで共有」を出す
   const canShare = typeof navigator.share === "function";
   const share = async () => {
     try {
-      await navigator.share({ title: props.event.name, url: url() });
+      await navigator.share({ title: props.event.name, url: withSource(url(), "share") });
+      trackShare("share");
     } catch {
       // キャンセル（AbortError）や失敗は何もしない。コピーや QR で共有できる
     }
@@ -535,15 +560,24 @@ function ShareContent(props: { event: EventInfo }) {
   return (
     <div class={styles.share}>
       <div class={styles.qr}>
-        <QrCode value={url()} label="イベントページの QR コード" size={208} />
+        <QrCode value={withSource(url(), "qr")} label="イベントページの QR コード" size={208} />
       </div>
-      <UrlField label="イベントページの URL" url={url()}>
+      <UrlField
+        label="イベントページの URL"
+        url={withSource(url(), "link")}
+        onCopy={() => trackShare("link")}
+      >
         {/* 外へ出る導線は新しいタブで開き、イベントページを残す */}
         <a
           class={button.secondary}
-          href={xPostUrl({ url: url(), text: props.event.name, hashtag: props.event.hashtag })}
+          href={xPostUrl({
+            url: withSource(url(), "x"),
+            text: props.event.name,
+            hashtag: props.event.hashtag,
+          })}
           target="_blank"
           rel="noopener"
+          onClick={() => trackShare("x")}
         >
           X でポスト
           <Icon name="external" size={16} />
