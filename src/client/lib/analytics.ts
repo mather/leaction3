@@ -1,14 +1,13 @@
 import * as v from "valibot";
 import {
-  ANALYTICS_PAGES,
   type AnalyticsPage,
   EventIdSchema,
   FOOTPRINTS_MAX_ITEMS,
   type Footprint,
   type FootprintsInput,
-  TRAFFIC_SOURCES,
   type TrafficSource,
   type Visitor,
+  VisitorSchema,
 } from "../../shared/schema";
 import { landingSource, pageOf, SRC_PARAM } from "./traffic";
 
@@ -22,16 +21,13 @@ const CREATED_RETAINED = 20;
 const FLUSH_DELAY_MS = 5000;
 const FLUSH_COUNT = 10;
 
-/** localStorage に保存する形。送るときは created を件数にする */
+/**
+ * localStorage に保存する形。送るときは created を件数にする。
+ * 送るときの VisitorSchema と同じ制約で確かめ、壊れた値は捨てて作り直す（読み込むと送るたびに Worker で捨てられ続けるため）
+ */
 const StoredVisitorSchema = v.object({
-  anon: v.string(),
-  src: v.picklist(TRAFFIC_SOURCES),
-  entry: v.picklist(ANALYTICS_PAGES),
-  ref: v.string(),
-  eventId: v.string(),
-  at: v.number(),
-  joinedAt: v.nullable(v.number()),
-  created: v.array(v.string()),
+  ...VisitorSchema.entries,
+  created: v.array(EventIdSchema),
 });
 
 type StoredVisitor = v.InferOutput<typeof StoredVisitorSchema>;
