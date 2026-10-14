@@ -222,6 +222,18 @@ export function NewEvent() {
           <button type="submit" class={`${button.primary} ${button.block}`} disabled={submitting()}>
             {submitting() ? "作成中…" : "イベントを作成"}
           </button>
+          {/* 入力中のフォームを残すため、新しいタブで開く */}
+          <p class={styles.consent}>
+            作成すると、
+            <a href="/terms" target="_blank" rel="noopener">
+              利用規約
+            </a>
+            と
+            <a href="/privacy" target="_blank" rel="noopener">
+              プライバシーポリシー
+            </a>
+            に同意したものとみなします。
+          </p>
         </div>
       </form>
     );

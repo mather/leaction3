@@ -77,7 +77,7 @@ flowchart LR
 
 | メソッド・パス | 権限 | 内容 |
 | --- | --- | --- |
-| `GET /`、`GET /new` | 誰でも | SPA の HTML。サービス共通の OGP |
+| `GET /`、`GET /new`、`GET /terms`、`GET /privacy` | 誰でも | SPA の HTML。サービス共通の OGP |
 | `GET /e/:id` | 誰でも | SPA の HTML。イベント名入りの OGP を差し込む |
 | `GET /api/session` | 誰でも | 有効な参加者 Cookie があるかを返す（ないときは 401）。あれば同じ ID で出し直して有効期限を延ばす |
 | `POST /api/session` | 誰でも | Turnstile トークンを検証し、参加者 ID の Cookie を発行。有効な Cookie があれば検証せずそのまま使う |
