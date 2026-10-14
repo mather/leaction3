@@ -3,9 +3,8 @@ import { For } from "solid-js";
 import button from "../components/button.module.css";
 import { Icon, type IconName } from "../components/Icon";
 import { track, trackView } from "../lib/analytics";
+import { CONTACT_FORM_URL, REPOSITORY_URL } from "../lib/site";
 import styles from "./Top.module.css";
-
-const REPOSITORY_URL = "https://github.com/mather/leaction3";
 
 // JSX のテキストを改行すると半角スペースが入るので、文字列で持つ
 const LEAD =
@@ -144,9 +143,17 @@ export function Top() {
 
       <footer class={styles.footer}>
         <ul class={styles.footerLinks}>
-          {/* 文面が決まるまで準備中（docs/requirements.md の未決事項） */}
-          <li>利用規約（準備中）</li>
-          <li>プライバシー（準備中）</li>
+          <li>
+            <A href="/terms">利用規約</A>
+          </li>
+          <li>
+            <A href="/privacy">プライバシーポリシー</A>
+          </li>
+          <li>
+            <a href={CONTACT_FORM_URL} target="_blank" rel="noopener">
+              お問い合わせ
+            </a>
+          </li>
           <li>
             <a href={REPOSITORY_URL} target="_blank" rel="noopener">
               GitHub
