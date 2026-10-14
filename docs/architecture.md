@@ -11,10 +11,12 @@ flowchart LR
   R["EventRoom（DO）<br/>1イベント＝1インスタンス<br/>SQLite：コメント・いいね<br/>WS配信・待機中は休止"]
   T["Turnstile<br/>入室時・作成時に1回"]
   D["D1<br/>イベントの索引（events）"]
+  E["Analytics Engine<br/>閲覧・操作の計測"]
   B -- "HTTP / WS" --> W
   W -- "転送" --> R
   B -- "トークン取得" --> T
   W -- "読み書き" --> D
+  W -- "計測" --> E
 ```
 
 | 要素 | 役割 |
@@ -23,6 +25,7 @@ flowchart LR
 | EventRoom（Durable Object、SQLite） | イベントの全データ。WebSocket の受付と配信（Hibernation API）、連投上限、削除後の掃除アラーム |
 | D1 | イベントの索引。OGP 生成や ID の存在確認で、EventRoom を起こさずに済む読み取りを担う |
 | Turnstile | イベントページを開いたときと作成時に 1 回だけ |
+| Analytics Engine | アクセス解析（閲覧・操作・流入元）。詳細は [analytics.md](analytics.md) |
 
 開発環境は Wrangler と Vite（Cloudflare Vite プラグイン）で、DO・D1 も含めてローカルで動かす。デプロイは GitHub Actions から行い、PR ごとにプレビューを出す現行の運用を引き継ぐ。main への push で本番にデプロイし、PR はプレビュー環境（`wrangler.jsonc` の `env.preview`。Worker `leaction-preview` と D1 `leaction-preview` で本番とデータを分ける）に上書きでデプロイする。プレビュー環境は全 PR で 1 つで、Turnstile はテスト用キーを使う。手順は README の「デプロイ」を参照。
 
@@ -35,8 +38,9 @@ flowchart LR
 | テーブル | 主な列 | 用途 |
 | --- | --- | --- |
 | `events` | `id`（nanoid 8 文字）, `name`, `date`, `created_at`, `deleted_at` | OGP 生成、ID の存在確認、削除済みの掃除 |
+| `event_creations` | `event_id`, `created_at`, `anon_id`, `first_src` など作成者の初回接触 | アクセス解析（観客から作成者への転換）。イベントを削除しても残す。[analytics.md](analytics.md) を参照 |
 
-イベント一覧や検索の画面は持たないので、D1 はこの 1 表で足りる。将来の集計や掃除のために残す。
+イベント一覧や検索の画面は持たないので、イベントの索引は `events` の 1 表で足りる。将来の集計や掃除のために残す。
 
 イベント名・開催日を変更したときは、EventRoom が D1 の `events` も更新する（OGP を最新に保つため）。
 
@@ -92,10 +96,11 @@ flowchart LR
 | `POST` / `DELETE /api/rooms/:id/admin-keys[/:keyId]` | 作成者 | 共同管理者 URL の発行・無効化。発行時だけトークンを返す。有効な URL は上限（初期値 20）まで |
 | `DELETE /api/rooms/:id`（と `POST .../restore`） | 作成者 | 論理削除と復元。復元は期限（7 日）内だけで、過ぎていれば 404 |
 | `POST /api/rooms/:id/unarchive` | 作成者 | アーカイブの解除。アーカイブ済みでなければ 409 |
+| `POST /api/footprints` | 誰でも（同じオリジン） | アクセス解析の計測をまとめて送る。常に 204。[analytics.md](analytics.md) を参照 |
 
 `GET /api/rooms/:id` と `GET /api/rooms/:id/admin` は `archiveAt`（ミリ秒）を返す。アーカイブ済みのイベントに対するイベント情報・発表枠の編集と、コメント受付の切り替えは 409 を返す。
 
-API のパスは、広告・トラッカーブロッカーのフィルタリストに当たらないものにする。以前は `/api/events/…` だったが、EasyPrivacy の `||workers.dev/api/event`（workers.dev 上でパスが `/api/event` で始まるリクエストをすべて遮断する）に当たり、ブロッカーを組み込んだブラウザ（Dia）ではイベントの作成・閲覧・WebSocket がすべて失敗した（#27）。`/api/event…`、`/track`、`/collect`、`/beacon` などで始まる・終わるパスは使わない。パスを変えるときは EasyPrivacy で `||workers.dev/` と、変えたパスを検索して確かめる。
+API のパスは、広告・トラッカーブロッカーのフィルタリストに当たらないものにする。以前は `/api/events/…` だったが、EasyPrivacy の `||workers.dev/api/event`（workers.dev 上でパスが `/api/event` で始まるリクエストをすべて遮断する）に当たり、ブロッカーを組み込んだブラウザ（Dia）ではイベントの作成・閲覧・WebSocket がすべて失敗した（#27）。`/api/event…`、`/track`、`/collect`、`/beacon`、`/analytics`、`/metrics` などで始まる・終わるパスは使わない。パスを変えるときは EasyPrivacy で `||workers.dev/` と、変えたパスを検索して確かめる。
 
 作成者だけの操作を共同管理者の管理セッションで呼ぶと 403 を返す。
 

@@ -6,6 +6,7 @@ import type { CreateEventResponse } from "../../shared/api";
 import { createEventInputSchema, DEFAULT_LIMITS } from "../../shared/schema";
 import button from "../components/button.module.css";
 import { Icon } from "../components/Icon";
+import { currentVisitor, markCreated, trackView } from "../lib/analytics";
 import { ApiError, createEvent } from "../lib/api";
 import { getTurnstileToken } from "../lib/turnstile";
 import { Created } from "./Created";
@@ -36,6 +37,7 @@ export function NewEvent() {
   });
   const [submitting, setSubmitting] = createSignal(false);
   const [error, setError] = createSignal<string>();
+  trackView("new");
   const [created, setCreated] = createSignal<CreateEventResponse & { name: string }>();
 
   function addTalk() {
@@ -66,7 +68,8 @@ export function NewEvent() {
     setSubmitting(true);
     try {
       const turnstileToken = await getTurnstileToken("create_event");
-      const res = await createEvent({ ...input, turnstileToken });
+      const res = await createEvent({ ...input, turnstileToken, visitor: currentVisitor() });
+      markCreated(res.id);
       setCreated({ ...res, name: form.name.trim() });
       window.scrollTo(0, 0);
     } catch (err) {

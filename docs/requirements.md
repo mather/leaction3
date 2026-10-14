@@ -153,5 +153,5 @@ MVP（最初のリリース）は、現行の機能に秘密 URL 管理とモデ
 - [x] スタイルの書き方 → CSS Modules
 - [x] 終了イベントの扱い → 開催日の 7 日後に読み取り専用にする。R2 には書き出さない（「終了イベントのアーカイブ」）
 - [ ] データの保持期間（無料枠のストレージ 5GB に対しては当面問題ない）
-- [ ] 利用規約・プライバシーポリシーの文面（Turnstile と Cookie の利用に触れる）
-- [ ] アクセス解析を入れるか（現行は GA4）。入れるなら Cloudflare Web Analytics が候補
+- [ ] 利用規約・プライバシーポリシーの文面（Turnstile と Cookie の利用、匿名 ID によるアクセス解析に触れる）
+- [x] アクセス解析 → 自前の計測（Analytics Engine + D1）と Cloudflare Web Analytics・Search Console の併用。GA4 は使わない（[analytics.md](analytics.md)）
