@@ -1,4 +1,5 @@
 import * as v from "valibot";
+import { REACTION_KINDS } from "./protocol";
 
 // 上限値はここに集める。Worker では resolveLimits(env) で環境変数による上書きを反映する。
 
@@ -249,6 +250,11 @@ export function clientMessageSchema(limits: Limits) {
     }),
     v.object({ type: v.literal("comment.delete"), commentId: id }),
     v.object({ type: v.literal("like.set"), commentId: id, liked: v.boolean() }),
+    v.object({
+      type: v.literal("reaction.set"),
+      talkId: id,
+      kind: v.nullable(v.picklist(REACTION_KINDS)),
+    }),
   ]);
 }
 
@@ -304,6 +310,11 @@ export const FootprintSchema = v.variant("name", [
     name: v.literal("click"),
     ...footprintBase,
     target: v.picklist(["top_create_hero", "top_create_bottom", "event_menu_top"]),
+  }),
+  v.object({
+    name: v.literal("reaction"),
+    ...footprintBase,
+    target: v.picklist(REACTION_KINDS),
   }),
   v.object({
     name: v.literal("share"),

@@ -10,7 +10,7 @@ const STORAGE: { name: string; kind: string; purpose: string; period: string }[]
     name: "pid",
     kind: "Cookie",
     purpose:
-      "参加者 ID。コメントやいいねを誰が送ったかを判定し、自分のコメントを削除できるようにする",
+      "参加者 ID。コメント・いいね・感想を誰が送ったかを判定し、自分のコメントを削除できるようにする",
     period: "1 年（イベントページを開くたびに延長）",
   },
   {
@@ -30,6 +30,12 @@ const STORAGE: { name: string; kind: string; purpose: string; period: string }[]
     name: "leaction:lastTalk:（イベント ID）",
     kind: "localStorage",
     purpose: "そのイベントで最後に見ていた発表。次に開いたときに同じ発表を表示する",
+    period: "ブラウザで削除するまで",
+  },
+  {
+    name: "leaction:reactionsOpen",
+    kind: "localStorage",
+    purpose: "イベントページの感想の枠を開いているか畳んでいるか",
     period: "ブラウザで削除するまで",
   },
   {
@@ -70,16 +76,17 @@ export function Privacy() {
           URL、ハッシュタグ、発表者名、発表タイトル
         </li>
         <li>
-          <strong>投稿</strong>: コメントの本文、いいね、それらの日時
+          <strong>投稿</strong>: コメントの本文、いいね、発表への感想、それらの日時
         </li>
         <li>
           <strong>参加者 ID</strong>: 初めてイベントページを開いたときに発行するランダムな ID
-          です。Cookie に保存し、コメントやいいねを誰が送ったかの判定に使います。主催者にも参加者 ID
+          です。Cookie
+          に保存し、コメント・いいね・感想を誰が送ったかの判定に使います。主催者にも参加者 ID
           そのものは見せず、同じ人の投稿であることが分かる別の短い記号だけを表示します。
         </li>
         <li>
           <strong>アクセス解析の情報</strong>: ブラウザごとの匿名 ID
-          と、画面の閲覧、コメントの送信、いいね、共有、リンクのクリックといった操作の種類、イベント
+          と、画面の閲覧、コメントの送信、いいね、感想、共有、リンクのクリックといった操作の種類、イベント
           ID、日時、国、初めて訪れたときの流入元（QR
           コード、検索、SNS、参照元サイトのドメインなど）。コメントの本文やイベント名は含めません。匿名
           ID は参加者 ID とは別のもので、両者を結びつけません。IP アドレスは保存しません。

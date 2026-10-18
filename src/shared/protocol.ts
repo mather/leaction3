@@ -34,6 +34,20 @@ export type Comment = {
   clientId?: string;
 };
 
+/** 発表への感想の種類。並びは画面の並び順 */
+export const REACTION_KINDS = ["useful", "fun", "try", "more"] as const;
+export type ReactionKind = (typeof REACTION_KINDS)[number];
+
+/** 発表ごとの感想の票数 */
+export type ReactionCounts = Record<ReactionKind, number>;
+
+export type TalkReactions = {
+  talkId: TalkId;
+  counts: ReactionCounts;
+  /** 接続中の参加者自身の票。voter_id そのものは送らない */
+  mine: ReactionKind | null;
+};
+
 /** サーバー → クライアント */
 export type ServerMessage =
   | {
@@ -42,16 +56,32 @@ export type ServerMessage =
       event: EventInfo;
       talks: Talk[];
       comments: Comment[];
+      /** すべての発表の感想 */
+      reactions: TalkReactions[];
     }
   | { type: "comment.added"; seq: number; comment: Comment }
   | { type: "comment.removed"; seq: number; commentId: CommentId }
   | { type: "like.changed"; seq: number; commentId: CommentId; likes: number; likedByMe?: boolean }
+  /** mine は投票した本人の接続にだけ付ける */
+  | {
+      type: "reaction.changed";
+      seq: number;
+      talkId: TalkId;
+      counts: ReactionCounts;
+      mine?: ReactionKind | null;
+    }
   | { type: "event.updated"; seq: number; event: EventInfo }
   | { type: "talks.updated"; seq: number; talks: Talk[] }
   /** 再送された投稿がすでに登録済みだったとき、送った本人の接続にだけ返す（seq なし） */
   | { type: "comment.accepted"; clientId: string; commentId: CommentId }
-  /** 投稿への応答なら clientId、いいね・削除への応答なら commentId を付ける */
-  | { type: "error"; code: ErrorCode; clientId?: string; commentId?: CommentId };
+  /** 投稿への応答なら clientId、いいね・削除への応答なら commentId、感想への応答なら talkId を付ける */
+  | {
+      type: "error";
+      code: ErrorCode;
+      clientId?: string;
+      commentId?: CommentId;
+      talkId?: TalkId;
+    };
 
 /**
  * クライアント → サーバー。
@@ -60,7 +90,9 @@ export type ServerMessage =
 export type ClientMessage =
   | { type: "comment.post"; talkId: TalkId; body: string; clientId: string }
   | { type: "comment.delete"; commentId: CommentId }
-  | { type: "like.set"; commentId: CommentId; liked: boolean };
+  | { type: "like.set"; commentId: CommentId; liked: boolean }
+  /** kind が null なら取り消し */
+  | { type: "reaction.set"; talkId: TalkId; kind: ReactionKind | null };
 
 export type ErrorCode = "rate_limited" | "comments_closed" | "invalid_message" | "not_found";
 

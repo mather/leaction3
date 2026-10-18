@@ -1,6 +1,7 @@
 import { runInDurableObject } from "cloudflare:test";
 import { env, exports } from "cloudflare:workers";
 import { describe, expect, it } from "vitest";
+import type { ReactionCounts } from "../src/shared/protocol";
 import { DEFAULT_LIMITS } from "../src/shared/schema";
 import { Client, connect, createEvent, expectType, ORIGIN, participant, upgrade } from "./helpers";
 
@@ -271,6 +272,132 @@ describe("like.set", () => {
         commentId,
         likes: 0,
         likedByMe: false,
+      });
+    }
+  });
+});
+
+describe("reaction.set", () => {
+  const counts = (extra: Partial<ReactionCounts> = {}): ReactionCounts => ({
+    useful: 0,
+    fun: 0,
+    try: 0,
+    more: 0,
+    ...extra,
+  });
+
+  async function setup() {
+    const { id, talkIds } = await createEvent();
+    const [talk, second] = talkIds as [string, string];
+    const aliceCookie = await participant();
+    const bobCookie = await participant();
+    const alice = await connect(id, aliceCookie);
+    const bob = await connect(id, bobCookie);
+    await expectType(alice, "snapshot");
+    await expectType(bob, "snapshot");
+    return { id, talk, second, alice, aliceCookie, bob, bobCookie };
+  }
+
+  it("投票・付け替え・取り消しを全接続に配信し、mine は本人にだけ付ける", async () => {
+    const { talk, alice, bob } = await setup();
+
+    alice.send({ type: "reaction.set", talkId: talk, kind: "fun", voterId: "x" });
+    expect(await expectType(alice, "reaction.changed")).toEqual({
+      type: "reaction.changed",
+      seq: 1,
+      talkId: talk,
+      counts: counts({ fun: 1 }),
+      mine: "fun",
+    });
+    expect(await expectType(bob, "reaction.changed")).toEqual({
+      type: "reaction.changed",
+      seq: 1,
+      talkId: talk,
+      counts: counts({ fun: 1 }),
+    });
+
+    alice.send({ type: "reaction.set", talkId: talk, kind: "more" });
+    expect(await expectType(alice, "reaction.changed")).toMatchObject({
+      seq: 2,
+      counts: counts({ more: 1 }),
+      mine: "more",
+    });
+    await expectType(bob, "reaction.changed");
+
+    bob.send({ type: "reaction.set", talkId: talk, kind: "more" });
+    expect(await expectType(bob, "reaction.changed")).toMatchObject({
+      counts: counts({ more: 2 }),
+      mine: "more",
+    });
+    await expectType(alice, "reaction.changed");
+
+    alice.send({ type: "reaction.set", talkId: talk, kind: null });
+    expect(await expectType(alice, "reaction.changed")).toMatchObject({
+      seq: 4,
+      counts: counts({ more: 1 }),
+      mine: null,
+    });
+  });
+
+  it("状態が変わらない投票・取り消しは何も配信しない", async () => {
+    const { talk, alice } = await setup();
+    alice.send({ type: "reaction.set", talkId: talk, kind: null });
+    alice.send({ type: "reaction.set", talkId: talk, kind: "try" });
+    alice.send({ type: "reaction.set", talkId: talk, kind: "try" });
+    expect(await expectType(alice, "reaction.changed")).toMatchObject({ seq: 1 });
+    // 次に届くのが新しい投稿なら、2 回目の投票では何も配信されていない
+    alice.post(talk, "次");
+    expect(await expectType(alice, "comment.added")).toMatchObject({ seq: 2 });
+  });
+
+  it("票は発表ごとに分かれ、snapshot に全発表の票数と自分の票を含める", async () => {
+    const { id, talk, second, alice, aliceCookie, bobCookie } = await setup();
+    alice.send({ type: "reaction.set", talkId: talk, kind: "useful" });
+    await expectType(alice, "reaction.changed");
+    alice.send({ type: "reaction.set", talkId: second, kind: "fun" });
+    await expectType(alice, "reaction.changed");
+
+    const mine = await expectType(await connect(id, aliceCookie), "snapshot");
+    expect(mine.reactions).toEqual([
+      { talkId: talk, counts: counts({ useful: 1 }), mine: "useful" },
+      { talkId: second, counts: counts({ fun: 1 }), mine: "fun" },
+    ]);
+    const other = await expectType(await connect(id, bobCookie), "snapshot");
+    expect(other.reactions.map((r) => r.mine)).toEqual([null, null]);
+  });
+
+  it("コメントの受付停止中も投票できる", async () => {
+    const { id, talk, alice } = await setup();
+    await runInDurableObject(env.EVENT_ROOM.getByName(id), (_, state) => {
+      state.storage.sql.exec("UPDATE event SET comments_open = 0");
+    });
+    alice.send({ type: "reaction.set", talkId: talk, kind: "fun" });
+    expect(await expectType(alice, "reaction.changed")).toMatchObject({ mine: "fun" });
+  });
+
+  it("存在しない発表には not_found、知らない種類は invalid_message", async () => {
+    const { talk, alice } = await setup();
+    alice.send({ type: "reaction.set", talkId: "nothere1", kind: "fun" });
+    expect(await alice.next()).toEqual({ type: "error", code: "not_found", talkId: "nothere1" });
+    alice.send({ type: "reaction.set", talkId: talk, kind: "cute" });
+    expect(await alice.next()).toEqual({ type: "error", code: "invalid_message" });
+  });
+
+  it("再接続時は送り直す時点の票数と自分の票を送る", async () => {
+    const { id, talk, alice, aliceCookie } = await setup();
+    alice.send({ type: "reaction.set", talkId: talk, kind: "fun" });
+    await expectType(alice, "reaction.changed");
+    alice.send({ type: "reaction.set", talkId: talk, kind: "try" });
+    await expectType(alice, "reaction.changed");
+
+    const b = await connect(id, aliceCookie, 0);
+    for (const seq of [1, 2]) {
+      expect(await expectType(b, "reaction.changed")).toEqual({
+        type: "reaction.changed",
+        seq,
+        talkId: talk,
+        counts: counts({ try: 1 }),
+        mine: "try",
       });
     }
   });

@@ -1,5 +1,11 @@
 import { type Accessor, createEffect, createSignal, onCleanup } from "solid-js";
-import { type CommentId, type ErrorCode, type TalkId, WS_SINCE_PARAM } from "../../shared/protocol";
+import {
+  type CommentId,
+  type ErrorCode,
+  type ReactionKind,
+  type TalkId,
+  WS_SINCE_PARAM,
+} from "../../shared/protocol";
 import { ensureSession } from "./api";
 import {
   addPending,
@@ -11,8 +17,13 @@ import {
 } from "./room-state";
 import { RoomSocket, type SocketStatus } from "./ws";
 
-/** pending は失敗した投稿、commentId は失敗したいいね・削除の対象 */
-export type RoomError = { code: ErrorCode; pending?: PendingComment; commentId?: CommentId };
+/** pending は失敗した投稿、commentId は失敗したいいね・削除の対象、talkId は失敗した感想の対象 */
+export type RoomError = {
+  code: ErrorCode;
+  pending?: PendingComment;
+  commentId?: CommentId;
+  talkId?: TalkId;
+};
 
 function wsUrl(eventId: string, seq: number | null): string {
   const url = new URL(`/api/rooms/${encodeURIComponent(eventId)}/ws`, location.href);
@@ -47,7 +58,12 @@ export function createRoom(
       }
       if (message.type === "error") {
         const pending = current.pending.find((p) => p.clientId === message.clientId);
-        onError({ code: message.code, pending, commentId: message.commentId });
+        onError({
+          code: message.code,
+          pending,
+          commentId: message.commentId,
+          talkId: message.talkId,
+        });
       }
       setState(applyServerMessage(current, message));
     },
@@ -72,10 +88,12 @@ export function createRoom(
     socket.send({ type: "comment.post", ...pending });
   };
 
-  // いいね・削除は配信を待って画面に反映する。つながっていなければ送らずに false
+  // いいね・削除・感想は配信を待って画面に反映する。つながっていなければ送らずに false
   const like = (commentId: CommentId, liked: boolean) =>
     socket.send({ type: "like.set", commentId, liked });
   const remove = (commentId: CommentId) => socket.send({ type: "comment.delete", commentId });
+  const react = (talkId: TalkId, kind: ReactionKind | null) =>
+    socket.send({ type: "reaction.set", talkId, kind });
 
-  return { state, status, gone, post, like, remove };
+  return { state, status, gone, post, like, remove, react };
 }

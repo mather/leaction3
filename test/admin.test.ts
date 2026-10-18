@@ -259,6 +259,8 @@ describe("発表枠の管理", () => {
     await expectType(bob, "comment.added");
     bob.send({ type: "like.set", commentId: removed.comment.id, liked: true });
     await expectType(alice, "like.changed");
+    bob.send({ type: "reaction.set", talkId: first, kind: "fun" });
+    await expectType(alice, "reaction.changed");
 
     const res = await request(`/api/rooms/${id}/talks/${first}`, { method: "DELETE", cookie });
     expect(res.status).toBe(200);
@@ -269,8 +271,9 @@ describe("発表枠の管理", () => {
     const stored = await runInDurableObject(env.EVENT_ROOM.getByName(id), (_, state) => ({
       comments: state.storage.sql.exec("SELECT body FROM comments").toArray(),
       likes: state.storage.sql.exec("SELECT 1 FROM likes").toArray(),
+      reactions: state.storage.sql.exec("SELECT 1 FROM reactions").toArray(),
     }));
-    expect(stored).toEqual({ comments: [{ body: "残る" }], likes: [] });
+    expect(stored).toEqual({ comments: [{ body: "残る" }], likes: [], reactions: [] });
   });
 
   it("最後の 1 枠は削除できない", async () => {
