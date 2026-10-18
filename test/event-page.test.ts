@@ -3,6 +3,7 @@ import { env, exports } from "cloudflare:workers";
 import { describe, expect, it } from "vitest";
 import type { CreateEventResponse, GetEventResponse } from "../src/shared/api";
 import worker from "../src/worker/index";
+import { ogImageVersion } from "../src/worker/ogp";
 
 async function createEvent(name = "LT 会 #1") {
   const res = await exports.default.fetch("http://example.com/api/rooms", {
@@ -73,6 +74,8 @@ const INDEX_HTML = `<!doctype html><html><head>
 <meta name="description" content="共通の説明" />
 <meta property="og:title" content="LeacTion!" />
 <meta property="og:description" content="共通の説明" />
+<meta property="og:image" content="/ogp.png" />
+<meta property="og:image:alt" content="LeacTion!" />
 </head><body><div id="root"></div></body></html>`;
 
 /** 静的アセットの代わり。どのパスにも index.html を返す（SPA の not_found_handling と同じ） */
@@ -98,6 +101,19 @@ describe("GET /e/:id", () => {
       '<meta property="og:description" content="2026年10月1日開催「LT 会 #1」の発表に、ログインなしでコメントといいねを送れます。" />',
     );
     expect(html).toContain('<meta name="description" content="2026年10月1日開催');
+    expect(html).toContain('<meta property="og:image:alt" content="LT 会 #1 | LeacTion!" />');
+  });
+
+  it("OGP 画像はイベントの画像を絶対 URL で指し、名前と開催日から決まる版を付ける", async () => {
+    const id = await createEvent();
+    const html = await (await fetchPage(`/e/${id}`)).text();
+    const version = await ogImageVersion({ id, name: "LT 会 #1", date: "2026-10-01" });
+    expect(version).toMatch(/^[0-9a-f]{12}$/);
+    expect(html).toContain(
+      `<meta property="og:image" content="http://example.com/e/${id}/og.png?v=${version}" />`,
+    );
+    // 名前が変われば版も変わる
+    expect(await ogImageVersion({ id, name: "LT 会 #2", date: "2026-10-01" })).not.toBe(version);
   });
 
   it("イベント名の記号はエスケープする", async () => {
@@ -115,7 +131,9 @@ describe("GET /e/:id", () => {
   it("見つからなければ共通の OGP のまま 404", async () => {
     const res = await fetchPage("/e/nothere1");
     expect(res.status).toBe(404);
-    expect(await res.text()).toContain("<title>LeacTion!</title>");
+    const html = await res.text();
+    expect(html).toContain("<title>LeacTion!</title>");
+    expect(html).toContain('<meta property="og:image" content="http://example.com/ogp.png" />');
   });
 
   it("管理画面には差し込まない", async () => {
@@ -123,5 +141,31 @@ describe("GET /e/:id", () => {
     const res = await fetchPage(`/e/${id}/manage`);
     expect(res.status).toBe(200);
     expect(await res.text()).toContain("<title>LeacTion!</title>");
+  });
+});
+
+describe("共通の OGP 画像", () => {
+  it("トップページなどでは共通の画像を絶対 URL にする", async () => {
+    for (const path of ["/", "/new", "/terms"]) {
+      const html = await (await fetchPage(path)).text();
+      expect(html).toContain('<meta property="og:image" content="http://example.com/ogp.png" />');
+    }
+  });
+});
+
+describe("GET /e/:id/og.png", () => {
+  it("描けないときは共通の画像へリダイレクトする", async () => {
+    // テスト環境ではビルド済みの背景画像がなく、Images もオフライン版で文字を描けない
+    const id = await createEvent();
+    const res = await exports.default.fetch(`http://example.com/e/${id}/og.png`, {
+      redirect: "manual",
+    });
+    expect(res.status).toBe(302);
+    expect(res.headers.get("Location")).toBe("/ogp.png");
+  });
+
+  it("見つからなければ 404", async () => {
+    const res = await exports.default.fetch("http://example.com/e/ghost002/og.png");
+    expect(res.status).toBe(404);
   });
 });

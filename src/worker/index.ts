@@ -43,7 +43,8 @@ import {
   setAdminCookie,
 } from "./auth";
 import { type AdminError, type AdminResult, PARTICIPANT_HEADER } from "./event-room";
-import { eventOgp, injectOgp } from "./ogp";
+import { OG_IMAGE_BACKGROUND, renderOgImage } from "./og-image";
+import { absolutizeOgImage, eventOgp, injectOgp, ogImageVersion } from "./ogp";
 import { verifyTurnstile } from "./turnstile";
 
 export { EventRoom } from "./event-room";
@@ -376,6 +377,9 @@ const app = new Hono<{ Bindings: Env }>();
 
 app.route("/api", api);
 
+/** サービス共通の OGP 画像。イベントの画像が描けないときにも使う */
+const OG_IMAGE_DEFAULT = "/ogp.png";
+
 // イベントページの HTML。D1 の索引だけを見て OGP を差し込み、EventRoom は起こさない。
 app.get("/e/:id", async (c) => {
   const [html, event] = await Promise.all([
@@ -383,11 +387,53 @@ app.get("/e/:id", async (c) => {
     findIndexedEvent(c.env.DB, c.req.param("id")),
   ]);
   // 見つからないときも SPA を返し、画面側で「見つかりません」を出す
-  if (!event) return new Response(html.body, { status: 404, headers: html.headers });
-  return injectOgp(html, eventOgp(event));
+  const origin = new URL(c.req.url).origin;
+  if (!event) {
+    return absolutizeOgImage(
+      new Response(html.body, { status: 404, headers: html.headers }),
+      origin,
+    );
+  }
+  return injectOgp(html, await eventOgp(event, origin));
 });
 
-// /e/:id/manage など、OGP を差し込まない画面はそのまま静的アセット（SPA）に任せる
-app.all("*", (c) => c.env.ASSETS.fetch(c.req.raw));
+// イベントごとの OGP 画像。Images バインディングで描き、EventRoom は起こさない。
+// URL の ?v= が今の名前・開催日と合えば長くキャッシュさせる（変わったら OGP の URL ごと変わる）。
+app.get("/e/:id/og.png", async (c) => {
+  const event = await findIndexedEvent(c.env.DB, c.req.param("id"));
+  if (!event) return c.notFound();
+  const version = await ogImageVersion(event);
+  const cacheKey = new Request(new URL(`/e/${event.id}/og.png?v=${version}`, c.req.url));
+  const cache = caches.default;
+  const cached = await cache.match(cacheKey);
+  if (cached) return cached;
+  let image: Response;
+  try {
+    const background = await c.env.ASSETS.fetch(new URL(OG_IMAGE_BACKGROUND, c.req.url));
+    if (!background.ok || !background.body) throw new Error(`background: ${background.status}`);
+    image = await renderOgImage(c.env.IMAGES, event, background.body);
+  } catch (e) {
+    // 無料枠（月 5,000 件の変換）を使い切ったときなどは、共通の画像で代用する（キャッシュはしない）
+    console.error("og image", e);
+    return c.redirect(OG_IMAGE_DEFAULT, 302);
+  }
+  const fresh = c.req.query("v") === version;
+  const res = new Response(image.body, {
+    headers: {
+      "Content-Type": "image/png",
+      "Cache-Control": fresh ? "public, max-age=31536000, immutable" : "public, max-age=300",
+    },
+  });
+  if (fresh) c.executionCtx.waitUntil(cache.put(cacheKey, res.clone()));
+  return res;
+});
+
+// /e/:id/manage など、OGP を差し込まない画面はそのまま静的アセット（SPA）に任せる。
+// HTML なら og:image（共通の画像）を絶対 URL にする
+app.all("*", async (c) => {
+  const res = await c.env.ASSETS.fetch(c.req.raw);
+  if (!res.headers.get("Content-Type")?.startsWith("text/html")) return res;
+  return absolutizeOgImage(res, new URL(c.req.url).origin);
+});
 
 export default app satisfies ExportedHandler<Env>;
