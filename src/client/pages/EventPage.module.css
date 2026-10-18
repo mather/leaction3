@@ -512,3 +512,28 @@
   max-width: 100%;
   height: auto;
 }
+
+.firstVisit {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 12px;
+  background: var(--surface-sub);
+  border-top: 1px solid var(--line);
+  color: var(--text-sub);
+  font-size: 0.8125rem;
+  line-height: 1.6;
+}
+
+.firstVisit p {
+  flex: 1;
+  margin: 0;
+}
+
+.firstVisit a {
+  color: inherit;
+}
+
+.firstVisit button {
+  flex: none;
+}

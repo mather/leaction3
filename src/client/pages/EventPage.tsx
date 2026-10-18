@@ -22,6 +22,7 @@ import { Sheet } from "../components/Sheet";
 import { UrlField } from "../components/UrlField";
 import { markJoined, track, trackView } from "../lib/analytics";
 import { ApiError, ensureSession, getAdmin, getEvent } from "../lib/api";
+import { loadNoticeAcked, saveNoticeAcked } from "../lib/first-visit";
 import { loadLastViewedTalk, saveLastViewedTalk } from "../lib/last-talk";
 import { useLeaveGuard } from "../lib/leave-guard";
 import { createRoom, type RoomError } from "../lib/room";
@@ -94,6 +95,13 @@ function EventView(props: { data: GetEventResponse }) {
   onCleanup(() => clearTimeout(noticeTimer));
 
   const [draft, setDraft] = createSignal("");
+  // 初めての人には、投稿が公開されることと規約への同意を入力欄の上で知らせる
+  const [noticeAcked, setNoticeAcked] = createSignal(loadNoticeAcked());
+  const ackNotice = () => {
+    if (noticeAcked()) return;
+    saveNoticeAcked();
+    setNoticeAcked(true);
+  };
   // 未送信のコメントがあるときだけ、離れる前に確認する
   useLeaveGuard(
     () => draft().trim() !== "",
@@ -243,6 +251,7 @@ function EventView(props: { data: GetEventResponse }) {
     room.post(t.id, draft().trim());
     track({ name: "comment", page: "event", eventId });
     setDraft("");
+    ackNotice();
   };
   const placeholder = () => {
     const t = talk();
@@ -393,6 +402,26 @@ function EventView(props: { data: GetEventResponse }) {
             <p class={styles.connection} role="status">
               接続が切れました。再接続しています…
             </p>
+          </Show>
+          <Show when={!noticeAcked()}>
+            <div class={styles.firstVisit}>
+              {/* イベントページから離れないよう、新しいタブで開く */}
+              <p>
+                コメントは、このページの URL
+                を知っている人なら誰でも見られます。他人の権利を侵害する内容や、言葉づかいに気をつけてください。送信すると、
+                <a href="/terms" target="_blank" rel="noopener">
+                  利用規約
+                </a>
+                と
+                <a href="/privacy" target="_blank" rel="noopener">
+                  プライバシーポリシー
+                </a>
+                に同意したものとみなします。
+              </p>
+              <button type="button" class={button.secondary} onClick={ackNotice}>
+                OK
+              </button>
+            </div>
           </Show>
           <Show when={notice()}>
             <p class={styles.notice} role="alert">

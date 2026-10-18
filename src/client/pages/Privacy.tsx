@@ -32,6 +32,12 @@ const STORAGE: { name: string; kind: string; purpose: string; period: string }[]
     purpose: "そのイベントで最後に見ていた発表。次に開いたときに同じ発表を表示する",
     period: "ブラウザで削除するまで",
   },
+  {
+    name: "leaction:noticeAck",
+    kind: "localStorage",
+    purpose: "イベントページの初回の案内（投稿の公開範囲と利用規約への同意）を確認したこと",
+    period: "ブラウザで削除するまで",
+  },
 ];
 
 const RECIPIENTS: { name: string; data: string; purpose: string; policy: string }[] = [
