@@ -486,6 +486,14 @@ function EventView(props: { data: GetEventResponse }) {
             LeacTion! について・イベントを作る
             <Icon name="external" />
           </a>
+          <a class={styles.menuItem} href="/terms" target="_blank" rel="noopener">
+            利用規約
+            <Icon name="external" />
+          </a>
+          <a class={styles.menuItem} href="/privacy" target="_blank" rel="noopener">
+            プライバシーポリシー
+            <Icon name="external" />
+          </a>
           <Show when={isAdmin()}>
             <A class={styles.menuItem} href={`/e/${encodeURIComponent(event().id)}/manage`}>
               イベントを管理する

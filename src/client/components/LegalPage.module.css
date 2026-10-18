@@ -1,0 +1,141 @@
+.page {
+  max-width: 640px;
+  margin: 0 auto;
+  padding: 24px 16px 0;
+}
+
+.header {
+  display: grid;
+  gap: 4px;
+  padding-bottom: 16px;
+  border-bottom: 1px solid var(--line);
+}
+
+.logo {
+  justify-self: start;
+  font-family: var(--font-logo);
+  font-weight: 800;
+  font-size: 1.125rem;
+  color: var(--accent);
+  text-decoration: none;
+}
+
+.title {
+  margin: 8px 0 0;
+  font-size: 1.5rem;
+  font-weight: 700;
+}
+
+.date {
+  margin: 0;
+  color: var(--text-sub);
+  font-size: 0.875rem;
+}
+
+.body {
+  padding: 8px 0 24px;
+  font-size: 0.9375rem;
+  overflow-wrap: anywhere;
+}
+
+.body h2 {
+  margin: 28px 0 8px;
+  font-size: 1.0625rem;
+  font-weight: 700;
+}
+
+.body p,
+.body ul,
+.body ol {
+  margin: 8px 0;
+}
+
+.body ul,
+.body ol {
+  padding-left: 1.5em;
+}
+
+.body li + li {
+  margin-top: 4px;
+}
+
+.body a {
+  color: var(--accent);
+}
+
+.body table {
+  width: 100%;
+  margin: 8px 0;
+  border-collapse: collapse;
+  font-size: 0.875rem;
+}
+
+.body th,
+.body td {
+  padding: 8px;
+  border: 1px solid var(--line);
+  text-align: left;
+  vertical-align: top;
+}
+
+.body th {
+  background: var(--surface-sub);
+  font-weight: 500;
+}
+
+/* 表はスマホ幅で横にはみ出さないよう、行ごとに縦積みにする */
+@media (max-width: 480px) {
+  .body table,
+  .body tbody,
+  .body tr,
+  .body td {
+    display: block;
+  }
+
+  .body thead {
+    display: none;
+  }
+
+  .body tr {
+    margin-bottom: 8px;
+    border: 1px solid var(--line);
+    border-radius: var(--radius-control);
+    background: var(--surface);
+  }
+
+  .body td {
+    border: 0;
+  }
+
+  .body td + td {
+    border-top: 1px solid var(--line);
+  }
+
+  .body td::before {
+    content: attr(data-label);
+    display: block;
+    color: var(--text-sub);
+    font-size: 0.75rem;
+  }
+}
+
+.footer {
+  padding: 24px 0 40px;
+  border-top: 1px solid var(--line);
+  font-size: 0.875rem;
+  color: var(--text-sub);
+}
+
+.footerLinks {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 4px 20px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.footerLinks a {
+  color: inherit;
+}

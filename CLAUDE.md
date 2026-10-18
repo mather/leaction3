@@ -28,7 +28,7 @@ LeacTion! を Cloudflare 上に再実装するプロジェクト。LT・勉強�
 ```
 src/
   client/            SolidJS の SPA
-    pages/           Top, EventPage, NewEvent, Created, Manage
+    pages/           Top, EventPage, NewEvent, Created, Manage, Terms, Privacy
     components/
     lib/             ws クライアント、API クライアント
   worker/
