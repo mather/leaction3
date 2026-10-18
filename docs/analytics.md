@@ -97,6 +97,7 @@ GA4 は使わない。ログインなしの設計と相性が悪く、LT の参�
 | `view` | 画面を開いたとき | — |
 | `comment` | コメントを送ったとき | — |
 | `like` | いいねを付けたとき（外したときは送らない） | — |
+| `reaction` | 感想に投票した・付け替えたとき（取り消したときは送らない） | 感想の種類（`useful` / `fun` / `try` / `more`） |
 | `click` | 導線を押したとき | `top_create_hero` / `top_create_bottom`（トップの「イベントを作る」）、`event_menu_top`（イベントページのメニューからトップへ） |
 | `share` | 共有の操作をしたとき | `qr`（共有シートを開いて QR を表示）/ `link`（コピー）/ `x` / `share`（Web Share API で共有できた） |
 | `create` | イベントを作成できたとき（Worker が記録する） | — |
