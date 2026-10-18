@@ -35,6 +35,8 @@ src/
     index.ts         Worker エントリ（ルーティング、Cookie）
     ogp.ts           /e/:id への OGP 差し込み（HTMLRewriter）
     event-room.ts    Durable Object「EventRoom」
+    og-image.ts      イベントの OGP 画像の描画（Images バインディング）
+    og-layout.ts     OGP 画像の配置（背景の生成スクリプトと共用）
     auth.ts          Cookie 署名、トークンのハッシュ化・照合
     turnstile.ts
     analytics.ts     計測の書き込み（Analytics Engine、D1 の event_creations）
@@ -59,6 +61,7 @@ pnpm deploy             # vite build して wrangler deploy
 pnpm db:migrate         # ローカル D1 にマイグレーションを適用
 pnpm db:migrate:remote  # 本番 D1 に適用
 pnpm cf-typegen         # worker-configuration.d.ts を再生成
+pnpm ogp:images         # OGP 画像の背景（public/ogp.png, ogp-event.png）を作り直す
 ```
 
 ## 守るべき設計ルール

@@ -12,8 +12,10 @@ flowchart LR
   T["Turnstile<br/>入室時・作成時に1回"]
   D["D1<br/>イベントの索引（events）"]
   E["Analytics Engine<br/>閲覧・操作の計測"]
+  I["Images<br/>OGP画像の描画"]
   B -- "HTTP / WS" --> W
   W -- "転送" --> R
+  W -- "描画" --> I
   B -- "トークン取得" --> T
   W -- "読み書き" --> D
   W -- "計測" --> E
@@ -23,6 +25,7 @@ flowchart LR
 | --- | --- |
 | Worker（静的アセット付き） | SPA の配信、`/e/:id` への OGP 差し込み（HTMLRewriter）、API、Cookie の発行と検証、Turnstile の検証 |
 | EventRoom（Durable Object、SQLite） | イベントの全データ。WebSocket の受付と配信（Hibernation API）、連投上限、削除後の掃除アラーム |
+| Images（バインディング） | イベントごとの OGP 画像の描画。下の「OGP 画像」を参照 |
 | D1 | イベントの索引。OGP 生成や ID の存在確認で、EventRoom を起こさずに済む読み取りを担う |
 | Turnstile | イベントページを開いたときと作成時に 1 回だけ |
 | Analytics Engine | アクセス解析（閲覧・操作・流入元）。詳細は [analytics.md](analytics.md) |
@@ -79,6 +82,7 @@ flowchart LR
 | --- | --- | --- |
 | `GET /`、`GET /new`、`GET /terms`、`GET /privacy` | 誰でも | SPA の HTML。サービス共通の OGP |
 | `GET /e/:id` | 誰でも | SPA の HTML。イベント名入りの OGP を差し込む |
+| `GET /e/:id/og.png` | 誰でも | イベントの OGP 画像（1200×630 の PNG）。見つからなければ 404 |
 | `GET /api/session` | 誰でも | 有効な参加者 Cookie があるかを返す（ないときは 401）。あれば同じ ID で出し直して有効期限を延ばす |
 | `POST /api/session` | 誰でも | Turnstile トークンを検証し、参加者 ID の Cookie を発行。有効な Cookie があれば検証せずそのまま使う |
 | `POST /api/rooms` | 誰でも（Turnstile 必須） | イベント作成。返り値に作成者トークンを一度だけ含める |
@@ -103,6 +107,18 @@ flowchart LR
 API のパスは、広告・トラッカーブロッカーのフィルタリストに当たらないものにする。以前は `/api/events/…` だったが、EasyPrivacy の `||workers.dev/api/event`（workers.dev 上でパスが `/api/event` で始まるリクエストをすべて遮断する）に当たり、ブロッカーを組み込んだブラウザ（Dia）ではイベントの作成・閲覧・WebSocket がすべて失敗した（#27）。`/api/event…`、`/track`、`/collect`、`/beacon`、`/analytics`、`/metrics` などで始まる・終わるパスは使わない。パスを変えるときは EasyPrivacy で `||workers.dev/` と、変えたパスを検索して確かめる。
 
 作成者だけの操作を共同管理者の管理セッションで呼ぶと 403 を返す。
+
+### OGP 画像
+
+- 画像の背景は `scripts/ogp-images.ts`（`pnpm ogp:images`）で作り、`public/` の PNG をコミットする。デザインはアクセント色の地に白抜きのロゴ。イベント用はカードの位置を `src/worker/og-layout.ts` で文字の配置と揃える
+- トップページなどは共通の画像（`public/ogp.png`）を使う。`index.html` の `og:image` は相対パスで書き、Worker がリクエストのオリジンで絶対 URL にする（X や Facebook は相対パスを読まない）。そのため `/`・`/new`・`/terms`・`/privacy` も Worker を通す（`run_worker_first`）
+- イベントページの `og:image` は `/e/:id/og.png?v=<版>`。版はイベント名と開催日の SHA-256 の先頭 12 桁で、名前や開催日を変えると URL が変わる（X などは画像を URL ごとにキャッシュするため）
+- 画像は Images バインディングで描く。背景（`public/ogp-event.png`）に白いカードとロゴを焼き込んであり、イベント名と開催日の文字だけを重ねる。D1 の索引だけを見て、EventRoom は起こさない
+- Images の文字描画は指定できるのがフォント（URL）・大きさ・色だけで、折り返し・中央揃え・省略をしない。そのため行分けは Worker で行い（文字幅は文字の種類ごとに広めに見積もる）、1 行ずつ描く。位置を `top` だけ指定すると横方向は中央に置かれる。名前は長いほど小さくし、3 行を超えたら末尾を「…」にする
+- フォントは Google Fonts の Zen Kaku Gothic New Bold（TrueType）を URL で渡す
+- 無料プランの変換は月 5,000 件まで（同じ画像は月に 1 回だけ数える）。超えると描画が失敗するので、失敗したら共通の画像へリダイレクトする
+- `?v=` が今の版と合えば長期キャッシュ（`immutable`、Cache API にも置く）、合わなければ 5 分だけキャッシュする
+- ローカル（`pnpm dev`・Vitest）の Images はオフライン版で文字を描けず、共通の画像へのリダイレクトになる。描画を確かめるときは `wrangler dev --remote` かプレビュー環境を使う
 
 ## WebSocket メッセージ
 
