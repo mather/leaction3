@@ -1,5 +1,5 @@
 import { useNavigate } from "@solidjs/router";
-import { createEffect, createSignal, onCleanup } from "solid-js";
+import { createEffect, createSignal, onCleanup, Show } from "solid-js";
 import button from "../components/button.module.css";
 import { Icon } from "../components/Icon";
 import { UrlField } from "../components/UrlField";
@@ -20,26 +20,45 @@ export function Created(props: { id: string; ownerToken: string; name: string })
   const participantUrl = () => withSource(eventUrl(props.id), "host");
   trackView("created", props.id);
 
-  const mailto = () => {
-    const subject = `【LeacTion!】${props.name} の作成者用 URL`;
-    const body = [
-      `イベント「${props.name}」の作成者用 URL です。`,
-      "この URL をなくすと管理できなくなります。他の人には共有しないでください。",
+  // 保存用の文面。メーラーが関連付けられていない環境（ブラウザ版 Gmail など）では mailto: が
+  // 動かないので、ファイルに書き出すか Web Share API で他のアプリへ渡す
+  const savedText = () =>
+    [
+      `LeacTion! イベント「${props.name}」`,
       "",
-      `作成者用 URL: ${ownerUrl()}`,
-      `参加者用 URL: ${participantUrl()}`,
+      "作成者用 URL（この URL をなくすと管理できなくなります。他の人には共有しないでください）",
+      ownerUrl(),
+      "",
+      "参加者用 URL",
+      participantUrl(),
+      "",
     ].join("\n");
-    return `mailto:?subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(body)}`;
+
+  const download = () => {
+    const blob = new Blob([savedText()], { type: "text/plain;charset=utf-8" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `leaction-${props.id}.txt`;
+    a.click();
+    // クリック直後に revoke するとダウンロードが始まらないブラウザがあるので少し待つ
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
+  };
+
+  // Web Share API に対応したブラウザ（主にスマホ）でだけ「他のアプリで保存」を出す
+  const canShare = typeof navigator.share === "function";
+  const share = async () => {
+    try {
+      await navigator.share({ title: `${props.name} の作成者用 URL`, text: savedText() });
+    } catch {
+      // キャンセル（AbortError）や失敗は何もしない。コピーやテキスト保存で残せる
+    }
   };
 
   // 保存を確認するまでは、閉じる・再読み込みで URL を失わないよう警告する。
-  // mailto: のリンクでも beforeunload が発火するブラウザがあるので、その直後は警告しない。
-  let openingMail = false;
   createEffect(() => {
     if (saved()) return;
-    const warn = (e: BeforeUnloadEvent) => {
-      if (!openingMail) e.preventDefault();
-    };
+    const warn = (e: BeforeUnloadEvent) => e.preventDefault();
     window.addEventListener("beforeunload", warn);
     onCleanup(() => window.removeEventListener("beforeunload", warn));
   });
@@ -70,19 +89,16 @@ export function Created(props: { id: string; ownerToken: string; name: string })
           をなくすと管理できなくなります。他の人には共有しないでください。この画面を閉じると、二度と表示できません。
         </p>
         <UrlField label="作成者用 URL" url={ownerUrl()}>
-          <a
-            class={button.secondary}
-            href={mailto()}
-            onClick={() => {
-              openingMail = true;
-              setTimeout(() => {
-                openingMail = false;
-              }, 1000);
-            }}
-          >
-            <Icon name="mail" />
-            自分宛てにメールで送る
-          </a>
+          <button type="button" class={button.secondary} onClick={download}>
+            <Icon name="download" />
+            テキストで保存
+          </button>
+          <Show when={canShare}>
+            <button type="button" class={button.secondary} onClick={share}>
+              <Icon name="share" />
+              他のアプリで保存
+            </button>
+          </Show>
         </UrlField>
         <label class={styles.confirm}>
           <input
