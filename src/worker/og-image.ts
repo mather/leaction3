@@ -86,7 +86,7 @@ export function layoutName(name: string): { size: number; lines: string[] } {
     if (lines.length * size * LINE_HEIGHT <= height) return { size, lines };
   }
   const size = NAME_FONT_SIZES.at(-1) ?? 48;
-  const maxLines = Math.floor(height / (size * LINE_HEIGHT));
+  const maxLines = Math.max(1, Math.floor(height / (size * LINE_HEIGHT)));
   const lines = wrapText(name, size, maxWidth).slice(0, maxLines);
   lines[maxLines - 1] = withEllipsis(lines[maxLines - 1] ?? "", size, maxWidth);
   return { size, lines };

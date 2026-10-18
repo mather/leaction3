@@ -96,10 +96,13 @@ const event = background(
 /** Google Fonts から TrueType を取る（User-Agent を付けないと TrueType の URL が返る） */
 async function loadFont(family: string, weight: number): Promise<ArrayBuffer> {
   const params = new URLSearchParams({ family: `${family}:wght@${weight}` });
-  const css = await (await fetch(`https://fonts.googleapis.com/css2?${params}`)).text();
-  const url = css.match(/src: url\((.+?)\) format/)?.[1];
+  const css = await fetch(`https://fonts.googleapis.com/css2?${params}`);
+  if (!css.ok) throw new Error(`font css: ${css.status} ${family} ${weight}`);
+  const url = (await css.text()).match(/src: url\((.+?)\) format/)?.[1];
   if (!url) throw new Error(`font not found: ${family} ${weight}`);
-  return (await fetch(url)).arrayBuffer();
+  const font = await fetch(url);
+  if (!font.ok) throw new Error(`font file: ${font.status} ${family} ${weight}`);
+  return font.arrayBuffer();
 }
 
 const fonts = [
