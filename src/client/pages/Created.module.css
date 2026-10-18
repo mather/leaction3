@@ -75,6 +75,42 @@
   font-weight: 500;
 }
 
+.saveOptions {
+  display: grid;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+
+.saveTitle {
+  margin: 0;
+  color: var(--text-sub);
+  font-size: 0.875rem;
+  font-weight: 700;
+}
+
+.saveOption {
+  justify-content: flex-start;
+  gap: 10px;
+  padding: 10px 12px;
+  text-align: left;
+}
+
+.saveOption > svg {
+  flex: none;
+}
+
+.saveText {
+  display: grid;
+  gap: 2px;
+  font-weight: 700;
+}
+
+.saveDesc {
+  color: var(--text-sub);
+  font-size: 0.8125rem;
+  font-weight: 400;
+}
+
 .confirm {
   display: flex;
   align-items: center;

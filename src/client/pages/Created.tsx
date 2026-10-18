@@ -88,18 +88,37 @@ export function Created(props: { id: string; ownerToken: string; name: string })
           この URL
           をなくすと管理できなくなります。他の人には共有しないでください。この画面を閉じると、二度と表示できません。
         </p>
-        <UrlField label="作成者用 URL" url={ownerUrl()}>
-          <button type="button" class={button.secondary} onClick={download}>
+        <UrlField label="作成者用 URL" url={ownerUrl()} />
+        {/* コピーと並べると見分けにくいので、保存の手段は説明付きでまとめて出す */}
+        <div class={styles.saveOptions}>
+          <p class={styles.saveTitle}>コピー以外の保存方法</p>
+          <button
+            type="button"
+            class={`${button.secondary} ${styles.saveOption}`}
+            onClick={download}
+          >
             <Icon name="download" />
-            テキストで保存
+            <span class={styles.saveText}>
+              <span>テキストファイルで保存</span>
+              <span class={styles.saveDesc}>
+                この端末に URL を書いたファイルをダウンロードします
+              </span>
+            </span>
           </button>
           <Show when={canShare}>
-            <button type="button" class={button.secondary} onClick={share}>
+            <button
+              type="button"
+              class={`${button.secondary} ${styles.saveOption}`}
+              onClick={share}
+            >
               <Icon name="share" />
-              他のアプリで保存
+              <span class={styles.saveText}>
+                <span>他のアプリに送る</span>
+                <span class={styles.saveDesc}>メモやメール、自分宛てのチャットなどに送ります</span>
+              </span>
             </button>
           </Show>
-        </UrlField>
+        </div>
         <label class={styles.confirm}>
           <input
             type="checkbox"
