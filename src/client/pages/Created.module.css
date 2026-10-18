@@ -124,6 +124,22 @@
   cursor: pointer;
 }
 
+/* 枠の太さを変えると位置がずれるので、影で強調する */
+.confirmError {
+  border-color: var(--warn);
+  box-shadow: 0 0 0 1px var(--warn);
+}
+
+.confirmAlert {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin: -4px 0 0;
+  color: var(--warn);
+  font-size: 0.875rem;
+  font-weight: 700;
+}
+
 .checkbox {
   flex: none;
   width: 22px;
@@ -133,5 +149,14 @@
 }
 
 .footer {
+  display: grid;
+  gap: 8px;
   padding-top: 8px;
+}
+
+.nextHint {
+  margin: 0;
+  color: var(--text-sub);
+  font-size: 0.875rem;
+  text-align: center;
 }

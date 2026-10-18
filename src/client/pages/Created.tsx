@@ -10,11 +10,14 @@ import styles from "./Created.module.css";
 
 /**
  * 作成完了画面。作成者用 URL はハッシュしか保存しないため、ここでしか表示できない。
- * 保存を確認するまで次へ進めず、ページを閉じようとしたら警告する。
+ * 保存を確認するまで次へ進めず（押すとチェック欄で警告する）、ページを閉じようとしたら警告する。
  */
 export function Created(props: { id: string; ownerToken: string; name: string }) {
   const navigate = useNavigate();
   const [saved, setSaved] = createSignal(false);
+  // 保存を確認せずに「イベントページへ」を押したか。押したらチェック欄で警告する
+  const [needConfirm, setNeedConfirm] = createSignal(false);
+  let checkbox: HTMLInputElement | undefined;
   const ownerUrl = () => manageUrl(props.id, props.ownerToken);
   // 主催者が告知ページやスライドに載せる URL。経路が分かるよう ?src=host を付ける
   const participantUrl = () => withSource(eventUrl(props.id), "host");
@@ -53,6 +56,18 @@ export function Created(props: { id: string; ownerToken: string; name: string })
     } catch {
       // キャンセル（AbortError）や失敗は何もしない。コピーやテキスト保存で残せる
     }
+  };
+
+  // ボタンを disabled にすると押しても何も起きず、チェックが必要だと気づけない。
+  // 押せるようにしておき、未確認ならチェック欄まで戻して警告する
+  const goEvent = () => {
+    if (saved()) {
+      navigate(`/e/${props.id}`);
+      return;
+    }
+    setNeedConfirm(true);
+    checkbox?.scrollIntoView({ behavior: "smooth", block: "center" });
+    checkbox?.focus({ preventScroll: true });
   };
 
   // 保存を確認するまでは、閉じる・再読み込みで URL を失わないよう警告する。
@@ -119,8 +134,13 @@ export function Created(props: { id: string; ownerToken: string; name: string })
             </button>
           </Show>
         </div>
-        <label class={styles.confirm}>
+        <label
+          class={
+            needConfirm() && !saved() ? `${styles.confirm} ${styles.confirmError}` : styles.confirm
+          }
+        >
           <input
+            ref={checkbox}
             type="checkbox"
             class={styles.checkbox}
             checked={saved()}
@@ -128,17 +148,29 @@ export function Created(props: { id: string; ownerToken: string; name: string })
           />
           URL をブックマーク・保存しました
         </label>
+        <Show when={needConfirm() && !saved()}>
+          <p class={styles.confirmAlert} role="alert">
+            <Icon name="alert" size={16} />
+            URL を保存したら、チェックを入れてください
+          </p>
+        </Show>
       </section>
 
       <div class={styles.footer}>
         <button
           type="button"
           class={`${button.primary} ${button.block}`}
-          disabled={!saved()}
-          onClick={() => navigate(`/e/${props.id}`)}
+          aria-disabled={!saved()}
+          aria-describedby={saved() ? undefined : "created-next-hint"}
+          onClick={goEvent}
         >
           イベントページへ
         </button>
+        <Show when={!saved()}>
+          <p id="created-next-hint" class={styles.nextHint}>
+            上の「保存しました」にチェックを入れると進めます
+          </p>
+        </Show>
       </div>
     </main>
   );
