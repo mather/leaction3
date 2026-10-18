@@ -111,6 +111,12 @@
   font-weight: 400;
 }
 
+.coManageNote {
+  margin: -4px 0 0;
+  color: var(--text);
+  font-size: 0.875rem;
+}
+
 .confirm {
   display: flex;
   align-items: center;

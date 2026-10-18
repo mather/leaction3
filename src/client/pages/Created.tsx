@@ -103,6 +103,10 @@ export function Created(props: { id: string; ownerToken: string; name: string })
           この URL
           をなくすと管理できなくなります。他の人には共有しないでください。この画面を閉じると、二度と表示できません。
         </p>
+        <p class={styles.coManageNote}>
+          ほかの人と管理するときは、管理画面の「管理者」タブで共同管理者用の URL
+          を発行して渡せます。
+        </p>
         <UrlField label="作成者用 URL" url={ownerUrl()} />
         {/* コピーと並べると見分けにくいので、保存の手段は説明付きでまとめて出す */}
         <div class={styles.saveOptions}>
