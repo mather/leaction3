@@ -18,6 +18,11 @@
   opacity: 0.45;
 }
 
+/* 押せるが、まだ条件を満たしていないボタン。押すと理由を知らせる */
+.base[aria-disabled="true"] {
+  opacity: 0.45;
+}
+
 .primary {
   composes: base;
   border: 1px solid var(--accent);
