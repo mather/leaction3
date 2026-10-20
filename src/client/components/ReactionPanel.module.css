@@ -1,0 +1,181 @@
+/* 発表への感想の枠（docs/ui.md「感想」）。発表切り替えバーの下に置く */
+.panel {
+  display: grid;
+  gap: 10px;
+  margin: 8px 12px 0;
+  padding: 0 12px 12px;
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-card);
+}
+
+.panel[data-closed] {
+  padding-bottom: 0;
+}
+
+.head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  min-height: var(--tap-min);
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--text-sub);
+  font: inherit;
+  font-size: 0.8rem;
+  text-align: left;
+  cursor: pointer;
+}
+
+.head:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+  border-radius: 8px;
+}
+
+.chevron {
+  display: flex;
+  transition: transform 0.2s ease;
+}
+
+.panel:not([data-closed]) .chevron {
+  transform: rotate(90deg);
+}
+
+.title {
+  color: var(--text);
+  font-size: 0.85rem;
+  font-weight: 700;
+}
+
+.total {
+  margin-left: auto;
+  font-variant-numeric: tabular-nums;
+}
+
+.total b {
+  color: var(--text);
+  font-weight: 700;
+}
+
+.body {
+  display: grid;
+  gap: 12px;
+}
+
+.bar {
+  display: flex;
+  gap: 2px;
+  height: 8px;
+  overflow: hidden;
+  border-radius: 4px;
+  background: var(--line);
+}
+
+.bar > span {
+  display: block;
+  height: 100%;
+}
+
+.miniBar {
+  flex: 1 1 auto;
+  max-width: 120px;
+  height: 6px;
+}
+
+.choices {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 6px;
+}
+
+.choice {
+  display: grid;
+  justify-items: center;
+  gap: 2px;
+  min-height: var(--tap-min);
+  padding: 10px 2px 8px;
+  border: 1.5px solid var(--line);
+  border-radius: var(--radius-control);
+  background: var(--surface);
+  color: var(--text);
+  font: inherit;
+  cursor: pointer;
+  transition:
+    background-color 0.15s,
+    border-color 0.15s;
+}
+
+.choice:not(:disabled):hover {
+  background: var(--surface-sub);
+}
+
+.choice:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+.choice[aria-pressed="true"] {
+  border-color: var(--c);
+  background: color-mix(in srgb, var(--c) 9%, var(--surface));
+}
+
+.choice:disabled {
+  cursor: default;
+  opacity: 0.45;
+}
+
+.icon {
+  display: flex;
+  color: var(--c);
+}
+
+.choice[aria-pressed="true"] .icon svg {
+  animation: pop 0.22s ease-out;
+}
+
+.label {
+  font-size: 0.8rem;
+  font-weight: 700;
+  white-space: nowrap;
+}
+
+.percent {
+  color: var(--text-sub);
+  font-size: 0.75rem;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+}
+
+.choice[aria-pressed="true"] .percent {
+  color: var(--c);
+}
+
+.hint {
+  margin: 0;
+  color: var(--text-sub);
+  font-size: 0.75rem;
+}
+
+@keyframes pop {
+  0% {
+    transform: scale(0.82);
+  }
+  60% {
+    transform: scale(1.12);
+  }
+  100% {
+    transform: scale(1);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .chevron {
+    transition: none;
+  }
+  .choice[aria-pressed="true"] .icon svg {
+    animation: none;
+  }
+}

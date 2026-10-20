@@ -70,6 +70,18 @@ describe("POST /api/footprints", () => {
     expect(point?.doubles?.[2]).toBe(0);
   });
 
+  it("感想は種類を target に書き、知らない種類は書かない", async () => {
+    const write = vi.spyOn(env.ANALYTICS, "writeDataPoint");
+    const reaction = (target: string) => ({
+      visitor,
+      items: [{ name: "reaction", page: "event", eventId: "abcdEFGH", src: "qr", target }],
+    });
+    await request("/api/footprints", { method: "POST", body: reaction("cute") });
+    expect(write).not.toHaveBeenCalled();
+    await request("/api/footprints", { method: "POST", body: reaction("more") });
+    expect(write.mock.calls[0]?.[0]?.blobs?.[8]).toBe("more");
+  });
+
   it("不正な本文は書かずに 204 を返す", async () => {
     const write = vi.spyOn(env.ANALYTICS, "writeDataPoint");
     const bad = { ...body, items: [{ name: "view", page: "event", eventId: "x", src: "qr" }] };

@@ -18,6 +18,7 @@ import button from "../components/button.module.css";
 import { CommentBody } from "../components/CommentBody";
 import { Icon } from "../components/Icon";
 import { QrCode } from "../components/QrCode";
+import { ReactionPanel } from "../components/ReactionPanel";
 import { Sheet } from "../components/Sheet";
 import { UrlField } from "../components/UrlField";
 import { markJoined, track, trackView } from "../lib/analytics";
@@ -25,6 +26,7 @@ import { ApiError, ensureSession, getAdmin, getEvent } from "../lib/api";
 import { loadNoticeAcked, saveNoticeAcked } from "../lib/first-visit";
 import { loadLastViewedTalk, saveLastViewedTalk } from "../lib/last-talk";
 import { useLeaveGuard } from "../lib/leave-guard";
+import { emptyReactionCounts } from "../lib/reactions";
 import { createRoom, type RoomError } from "../lib/room";
 import { xPostUrl } from "../lib/share";
 import { commentPlaceholder, pickInitialTalk, talkLabel } from "../lib/talks";
@@ -112,8 +114,8 @@ function EventView(props: { data: GetEventResponse }) {
     props.data.event.id,
     () => session.state === "ready",
     (error: RoomError) => {
-      if (error.commentId !== undefined) {
-        // いいね・削除の失敗。コメントがもう消えていれば、その知らせが届いて画面から消える
+      if (error.commentId !== undefined || error.talkId !== undefined) {
+        // いいね・削除・感想の失敗。コメントや発表がもう消えていれば、その知らせが届いて画面から消える
         if (error.code !== "not_found") showNotice("操作できませんでした");
         return;
       }
@@ -170,7 +172,7 @@ function EventView(props: { data: GetEventResponse }) {
     setSheet("link");
   };
 
-  // いいね・削除は接続中だけ受け付ける（切れている間の操作は送られずに消えてしまうため）
+  // いいね・削除・感想は接続中だけ受け付ける（切れている間の操作は送られずに消えてしまうため）
   const connected = () => room.status() === "open" && loaded();
   const [deleteTarget, setDeleteTarget] = createSignal<Comment>();
   const confirmDelete = (c: Comment) => {
@@ -195,6 +197,8 @@ function EventView(props: { data: GetEventResponse }) {
     const next = talks()[index() + delta];
     if (next) setTalkId(next.id);
   };
+
+  const reactions = () => room.state().reactions.find((r) => r.talkId === talkId());
 
   // 全発表分のコメントを受け取り、表示する発表だけをここで絞り込む
   const comments = createMemo(() => room.state().comments.filter((c) => c.talkId === talkId()));
@@ -326,6 +330,22 @@ function EventView(props: { data: GetEventResponse }) {
                 <Icon name="chevron" />
               </button>
             </nav>
+          )}
+        </Show>
+
+        {/* 票数が届くまでは出さない（0 票と区別できないため） */}
+        <Show when={loaded() && talk()}>
+          {(t) => (
+            <ReactionPanel
+              counts={reactions()?.counts ?? emptyReactionCounts()}
+              mine={reactions()?.mine ?? null}
+              disabled={!connected()}
+              onSelect={(kind) => {
+                if (room.react(t().id, kind) && kind) {
+                  track({ name: "reaction", page: "event", eventId, target: kind });
+                }
+              }}
+            />
           )}
         </Show>
 

@@ -13,8 +13,12 @@ import {
   type Comment,
   type ErrorCode,
   type EventInfo,
+  REACTION_KINDS,
+  type ReactionCounts,
+  type ReactionKind,
   type ServerMessage,
   type Talk,
+  type TalkReactions,
   WS_CLOSE_EVENT_DELETED,
   WS_PING,
   WS_PONG,
@@ -75,6 +79,15 @@ CREATE TABLE IF NOT EXISTS likes (
   created_at INTEGER NOT NULL,
   PRIMARY KEY (comment_id, voter_id)
 );
+-- 発表への感想。1 人 1 票を主キーで守り、付け替えは kind の更新で行う
+CREATE TABLE IF NOT EXISTS reactions (
+  talk_id TEXT NOT NULL,
+  voter_id TEXT NOT NULL,
+  kind TEXT NOT NULL,
+  created_at INTEGER NOT NULL,
+  updated_at INTEGER NOT NULL,
+  PRIMARY KEY (talk_id, voter_id)
+);
 CREATE TABLE IF NOT EXISTS admin_keys (
   id TEXT PRIMARY KEY,
   role TEXT NOT NULL CHECK (role IN ('owner', 'manager')),
@@ -94,7 +107,8 @@ CREATE TABLE IF NOT EXISTS author_keys (
 );
 -- 配信した差分の記録。seq は差分の連番で、再接続時に取りこぼした分だけを送り直すのに使う。
 -- 本文などは持たず、送り直すときに今の comments から組み立てる（その間に非表示になったものは送らない）。
--- event.updated・talks.updated は comment_id を持たず、送り直すときは今のイベント情報・発表枠を送る
+-- event.updated・talks.updated は comment_id を持たず、送り直すときは今のイベント情報・発表枠を送る。
+-- reaction.changed は comment_id に発表 ID を入れ、送り直すときはその発表の今の票数を送る
 CREATE TABLE IF NOT EXISTS updates (
   seq INTEGER PRIMARY KEY,
   type TEXT NOT NULL,
@@ -113,6 +127,7 @@ type UpdateType =
   | "comment.added"
   | "comment.removed"
   | "like.changed"
+  | "reaction.changed"
   | "event.updated"
   | "talks.updated";
 
@@ -535,7 +550,7 @@ export class EventRoom extends DurableObject<Env> {
   }
 
   /**
-   * 発表枠を削除する。その発表のコメントといいねも同じトランザクションで消す。
+   * 発表枠を削除する。その発表のコメント・いいね・感想も同じトランザクションで消す。
    * 参加者の画面では、talks.updated で消えた発表のコメントを取り除く。最後の 1 枠は消せない
    */
   async deleteTalk(keyId: string, talkId: string): Promise<AdminResult<Talk[]>> {
@@ -553,6 +568,7 @@ export class EventRoom extends DurableObject<Env> {
         talkId,
       );
       sql.exec("DELETE FROM comments WHERE talk_id = ?", talkId);
+      sql.exec("DELETE FROM reactions WHERE talk_id = ?", talkId);
       sql.exec("DELETE FROM talks WHERE id = ?", talkId);
     });
   }
@@ -826,6 +842,8 @@ export class EventRoom extends DurableObject<Env> {
         return this.deleteComment(ws, participantId, message.commentId);
       case "like.set":
         return this.setLike(ws, participantId, message);
+      case "reaction.set":
+        return this.setReaction(ws, participantId, message);
     }
   }
 
@@ -870,7 +888,7 @@ export class EventRoom extends DurableObject<Env> {
         const comments = new Map(
           sql
             .exec<CommentRow>(
-              `${COMMENT_SELECT} AND c.id IN (SELECT comment_id FROM updates WHERE seq > ?2 AND type != 'comment.removed')`,
+              `${COMMENT_SELECT} AND c.id IN (SELECT comment_id FROM updates WHERE seq > ?2 AND type IN ('comment.added', 'like.changed'))`,
               viewer,
               since,
             )
@@ -879,6 +897,7 @@ export class EventRoom extends DurableObject<Env> {
         );
         const current = this.readEvent();
         if (!current) throw new Error("event not found");
+        const reactions = this.readReactions(viewer);
         // seq が飛ぶとクライアントは取りこぼしとみなして接続し直すので、差分 1 件につき必ず 1 通送る
         return updates.map((u): ServerMessage => {
           // イベント情報・発表枠は送り直す時点の内容。同じ差分が続いても結果は変わらない
@@ -887,6 +906,18 @@ export class EventRoom extends DurableObject<Env> {
           }
           if (u.type === "talks.updated") {
             return { type: "talks.updated", seq: u.seq, talks: current.talks };
+          }
+          if (u.type === "reaction.changed") {
+            // 票数は送り直す時点の値。その後に消えた発表は、続く talks.updated で取り除かれる
+            const talkId = u.comment_id ?? "";
+            const found = reactions.find((r) => r.talkId === talkId);
+            return {
+              type: "reaction.changed",
+              seq: u.seq,
+              talkId,
+              counts: found?.counts ?? emptyCounts(),
+              mine: found?.mine ?? null,
+            };
           }
           const commentId = u.comment_id ?? "";
           const comment = comments.get(commentId);
@@ -916,7 +947,42 @@ export class EventRoom extends DurableObject<Env> {
       .exec<CommentRow>(`${COMMENT_SELECT} ORDER BY c.created_at, c.rowid`, viewer)
       .toArray()
       .map((row) => toComment(row, viewer));
-    return { type: "snapshot", seq: this.seq, ...found, comments };
+    return {
+      type: "snapshot",
+      seq: this.seq,
+      ...found,
+      comments,
+      reactions: this.readReactions(viewer),
+    };
+  }
+
+  /** すべての発表の感想を、閲覧者（viewer）から見た形で発表の並び順に返す */
+  private readReactions(viewer: string): TalkReactions[] {
+    const sql = this.ctx.storage.sql;
+    const counts = new Map<string, ReactionCounts>();
+    for (const row of sql
+      .exec<{ talk_id: string; kind: ReactionKind; count: number }>(
+        "SELECT talk_id, kind, COUNT(*) AS count FROM reactions GROUP BY talk_id, kind",
+      )
+      .toArray()) {
+      const c = counts.get(row.talk_id) ?? emptyCounts();
+      c[row.kind] = row.count;
+      counts.set(row.talk_id, c);
+    }
+    const mine = new Map(
+      sql
+        .exec<{ talk_id: string; kind: ReactionKind }>(
+          "SELECT talk_id, kind FROM reactions WHERE voter_id = ?",
+          viewer,
+        )
+        .toArray()
+        .map((row) => [row.talk_id, row.kind]),
+    );
+    return this.readTalks().map((t) => ({
+      talkId: t.id,
+      counts: counts.get(t.id) ?? emptyCounts(),
+      mine: mine.get(t.id) ?? null,
+    }));
   }
 
   private postComment(
@@ -1051,6 +1117,63 @@ export class EventRoom extends DurableObject<Env> {
     }));
   }
 
+  /**
+   * 発表への感想の投票・付け替え・取り消し。投票者は接続の参加者 ID で、1 人 1 票は reactions の主キーで守る。
+   * いいねと同じく、コメントの受付停止と連投上限の対象にしない。状態が変わらなければ何も配信しない。
+   */
+  private setReaction(
+    ws: WebSocket,
+    voter: string,
+    { talkId, kind }: Extract<ClientMessage, { type: "reaction.set" }>,
+  ): void {
+    const sql = this.ctx.storage.sql;
+    const exists =
+      this.isActive() && sql.exec("SELECT 1 FROM talks WHERE id = ?", talkId).toArray().length > 0;
+    if (!exists) {
+      send(ws, { type: "error", code: "not_found", talkId });
+      return;
+    }
+
+    const now = Date.now();
+    const changed = this.ctx.storage.transactionSync(() => {
+      const cursor =
+        kind === null
+          ? sql.exec("DELETE FROM reactions WHERE talk_id = ? AND voter_id = ?", talkId, voter)
+          : sql.exec(
+              `INSERT INTO reactions (talk_id, voter_id, kind, created_at, updated_at) VALUES (?1, ?2, ?3, ?4, ?4)
+               ON CONFLICT (talk_id, voter_id) DO UPDATE SET kind = excluded.kind, updated_at = excluded.updated_at
+               WHERE kind != excluded.kind`,
+              talkId,
+              voter,
+              kind,
+              now,
+            );
+      cursor.toArray();
+      if (cursor.rowsWritten === 0) return false;
+      this.recordUpdate("reaction.changed", talkId, now);
+      return true;
+    });
+    if (!changed) return;
+
+    const counts = emptyCounts();
+    for (const row of sql
+      .exec<{ kind: ReactionKind; count: number }>(
+        "SELECT kind, COUNT(*) AS count FROM reactions WHERE talk_id = ? GROUP BY kind",
+        talkId,
+      )
+      .toArray()) {
+      counts[row.kind] = row.count;
+    }
+    // 他の人の票は変わらないので、投票者本人の接続にだけ mine を付ける
+    this.broadcast((viewer) => ({
+      type: "reaction.changed",
+      seq: this.seq,
+      talkId,
+      counts,
+      ...(viewer === voter ? { mine: kind } : {}),
+    }));
+  }
+
   /** 投稿を受け付けられるか。受け付けないときは、投稿者に返すメッセージ */
   private checkPost(
     author: string,
@@ -1127,6 +1250,10 @@ export class EventRoom extends DurableObject<Env> {
       }
     }
   }
+}
+
+function emptyCounts(): ReactionCounts {
+  return Object.fromEntries(REACTION_KINDS.map((k) => [k, 0])) as ReactionCounts;
 }
 
 function send(ws: WebSocket, message: ServerMessage): void {

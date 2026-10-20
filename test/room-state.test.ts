@@ -6,7 +6,7 @@ import {
   initialRoomState,
   type RoomState,
 } from "../src/client/lib/room-state";
-import type { Comment, ServerMessage } from "../src/shared/protocol";
+import type { Comment, ReactionCounts, ServerMessage } from "../src/shared/protocol";
 
 const event = {
   id: "event001",
@@ -31,6 +31,10 @@ function comment(id: string, extra: Partial<Comment> = {}): Comment {
   };
 }
 
+function counts(extra: Partial<ReactionCounts> = {}): ReactionCounts {
+  return { useful: 0, fun: 0, try: 0, more: 0, ...extra };
+}
+
 function apply(state: RoomState, ...messages: ServerMessage[]): RoomState {
   return messages.reduce(applyServerMessage, state);
 }
@@ -41,6 +45,7 @@ const loaded = apply(initialRoomState, {
   event,
   talks,
   comments: [comment("c1"), comment("c2")],
+  reactions: [{ talkId: "talk0001", counts: counts(), mine: null }],
 });
 
 describe("applyServerMessage", () => {
@@ -72,6 +77,7 @@ describe("applyServerMessage", () => {
       event,
       talks,
       comments: [comment("c1", { createdAt: 10 }), comment("c3", { createdAt: 30 })],
+      reactions: [],
     });
     const state = apply(base, {
       type: "comment.added",
@@ -91,6 +97,39 @@ describe("applyServerMessage", () => {
     expect(state.seq).toBe(4);
     expect(state.talks).toEqual([other]);
     expect(state.comments.map((c) => c.id)).toEqual(["c3"]);
+    expect(state.reactions).toEqual([]);
+  });
+
+  it("reaction.changed で票数を置き換え、mine は付いているときだけ変える", () => {
+    const state = apply(
+      loaded,
+      {
+        type: "reaction.changed",
+        seq: 3,
+        talkId: "talk0001",
+        counts: counts({ fun: 1 }),
+        mine: "fun",
+      },
+      { type: "reaction.changed", seq: 4, talkId: "talk0001", counts: counts({ fun: 1, try: 1 }) },
+      { type: "reaction.changed", seq: 5, talkId: "talk0002", counts: counts({ more: 1 }) },
+    );
+    expect(state.seq).toBe(5);
+    expect(state.reactions).toEqual([
+      { talkId: "talk0001", counts: counts({ fun: 1, try: 1 }), mine: "fun" },
+      { talkId: "talk0002", counts: counts({ more: 1 }), mine: null },
+    ]);
+    const cleared = apply(state, {
+      type: "reaction.changed",
+      seq: 6,
+      talkId: "talk0001",
+      counts: counts({ try: 1 }),
+      mine: null,
+    });
+    expect(cleared.reactions[0]).toEqual({
+      talkId: "talk0001",
+      counts: counts({ try: 1 }),
+      mine: null,
+    });
   });
 
   it("自分の投稿が届いたら送信中から外す", () => {
@@ -114,7 +153,14 @@ describe("applyServerMessage", () => {
     ].reduce(addPending, initialRoomState);
     const next = apply(
       state,
-      { type: "snapshot", seq: 1, event, talks, comments: [comment("c1", { clientId: "p1" })] },
+      {
+        type: "snapshot",
+        seq: 1,
+        event,
+        talks,
+        comments: [comment("c1", { clientId: "p1" })],
+        reactions: [],
+      },
       { type: "comment.accepted", clientId: "p2", commentId: "c0" },
       { type: "error", code: "rate_limited", clientId: "p3" },
     );

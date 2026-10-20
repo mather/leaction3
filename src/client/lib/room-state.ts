@@ -5,6 +5,7 @@ import type {
   ServerMessage,
   Talk,
   TalkId,
+  TalkReactions,
 } from "../../shared/protocol";
 
 // イベントページの状態。WebSocket で受け取ったメッセージを順に適用して作る。
@@ -24,6 +25,8 @@ export type RoomState = {
   talks: Talk[] | null;
   /** 表示中のコメント（古い順） */
   comments: Comment[];
+  /** 発表ごとの感想。まだ票のない発表も含む（snapshot 以降に追加された発表は含まない） */
+  reactions: TalkReactions[];
   pending: PendingComment[];
 };
 
@@ -32,6 +35,7 @@ export const initialRoomState: RoomState = {
   event: null,
   talks: null,
   comments: [],
+  reactions: [],
   pending: [],
 };
 
@@ -53,6 +57,7 @@ export function applyServerMessage(state: RoomState, message: ServerMessage): Ro
         event: message.event,
         talks: message.talks,
         comments: message.comments,
+        reactions: message.reactions,
         pending: state.pending.filter((p) => !confirmed.has(p.clientId)),
       };
     }
@@ -84,15 +89,31 @@ export function applyServerMessage(state: RoomState, message: ServerMessage): Ro
           likedByMe: message.likedByMe ?? c.likedByMe,
         })),
       };
+    case "reaction.changed": {
+      const { talkId, counts } = message;
+      const current = state.reactions.find((r) => r.talkId === talkId);
+      const updated: TalkReactions = {
+        talkId,
+        counts,
+        mine: message.mine === undefined ? (current?.mine ?? null) : message.mine,
+      };
+      return {
+        ...next,
+        reactions: current
+          ? state.reactions.map((r) => (r.talkId === talkId ? updated : r))
+          : [...state.reactions, updated],
+      };
+    }
     case "event.updated":
       return { ...next, event: message.event };
     case "talks.updated": {
-      // 削除された発表のコメントは、サーバーでも一緒に消えている
+      // 削除された発表のコメント・感想は、サーバーでも一緒に消えている
       const ids = new Set(message.talks.map((t) => t.id));
       return {
         ...next,
         talks: message.talks,
         comments: state.comments.filter((c) => ids.has(c.talkId)),
+        reactions: state.reactions.filter((r) => ids.has(r.talkId)),
       };
     }
   }

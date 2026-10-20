@@ -55,12 +55,13 @@ flowchart LR
 | `talks` | `id`, `position`, `speaker`, `title` | `position` で並べ替え |
 | `comments` | `id`, `talk_id`, `author_id`, `body`, `kind`, `hidden`, `created_at` | `kind` は将来の質問区別用、当面は `comment` 固定 |
 | `likes` | `comment_id`, `voter_id`, `created_at` | 主キーを `(comment_id, voter_id)` にして二重いいねを防ぐ |
+| `reactions` | `talk_id`, `voter_id`, `kind`, `created_at`, `updated_at` | 発表への感想。主キーを `(talk_id, voter_id)` にして 1 人 1 票にし、付け替えは `kind` の更新で行う。`kind` は `useful` / `fun` / `try` / `more` |
 | `admin_keys` | `id`, `role`（owner / manager）, `token_hash`, `created_at`, `revoked_at` | owner は 1 件、manager は複数 |
 | `hidden_authors` | `author_id`, `created_at` | 一括非表示した投稿者。以降の投稿も非表示にする |
 | `author_keys` | `author_id`, `key`, `created_at` | 管理画面で投稿者を表すキー（乱数）。参加者 ID は管理者にも見せない |
 
 - 非表示は削除ではなくフラグにし、管理画面から「表示に戻す」ができるようにする
-- 発表枠を削除したときは、その発表のコメントといいねも同じトランザクションで消す
+- 発表枠を削除したときは、その発表のコメント・いいね・感想も同じトランザクションで消す
 - イベント削除は `deleted_at` を入れる論理削除とし、7 日後に DO のアラームで全データを消す。D1 の `events` も削除時に `deleted_at` を入れ、掃除のときに行ごと消す
 - 復元の日数は `LIMIT_DELETED_RETENTION_DAYS` で変えられる
 
@@ -76,7 +77,7 @@ flowchart LR
 
 ## HTTP API
 
-参加者の操作（投稿・いいね・削除）は WebSocket で送り、管理操作は HTTP で送る。どちらも最終的に EventRoom が処理し、結果を全接続に配信する。
+参加者の操作（投稿・いいね・感想・削除）は WebSocket で送り、管理操作は HTTP で送る。どちらも最終的に EventRoom が処理し、結果を全接続に配信する。
 
 | メソッド・パス | 権限 | 内容 |
 | --- | --- | --- |
@@ -124,13 +125,14 @@ API のパスは、広告・トラッカーブロッカーのフィルタリス�
 
 | 向き | 種別 | 内容 |
 | --- | --- | --- |
-| サーバー→ | `snapshot` | 接続直後に送る。イベント・発表枠・表示中の全コメント・いいね数・自分がいいねしたコメント |
-| サーバー→ | `comment.added` / `comment.removed` / `like.changed` | 差分。各メッセージに連番 `seq` を付ける |
+| サーバー→ | `snapshot` | 接続直後に送る。イベント・発表枠・表示中の全コメント・いいね数・自分がいいねしたコメント・発表ごとの感想の票数と自分の票 |
+| サーバー→ | `comment.added` / `comment.removed` / `like.changed` / `reaction.changed` | 差分。各メッセージに連番 `seq` を付ける |
 | サーバー→ | `comment.accepted` | 再送された投稿が登録済みだったとき、送った本人にだけ返す（`seq` なし） |
-| サーバー→ | `error` | `rate_limited` / `comments_closed` / `archived` / `invalid_message` / `not_found`。投稿への応答なら `clientId`、いいね・削除への応答なら `commentId` を付ける |
+| サーバー→ | `error` | `rate_limited` / `comments_closed` / `archived` / `invalid_message` / `not_found`。投稿への応答なら `clientId`、いいね・削除への応答なら `commentId`、感想への応答なら `talkId` を付ける |
 | サーバー→ | `event.updated` / `talks.updated` | 管理操作の反映 |
 | クライアント→ | `comment.post` | `talkId`, `body`, クライアント生成の `clientId`（二重送信防止・自分の投稿の照合） |
 | クライアント→ | `comment.delete` / `like.set` | 自分のコメントの削除、いいねの付け外し |
+| クライアント→ | `reaction.set` | `talkId` と `kind`（取り消しは `null`）。発表への感想の投票・付け替え・取り消し |
 
 - 全発表分をまとめて配信し、発表の絞り込みはクライアントで行う。発表を切り替えても通信が起きず、一覧シートの件数表示もそのまま出せる
 - 再接続時は接続 URL の `?since=` に最後に受け取った `seq` を付け、それ以降の差分だけを受け取る。EventRoom は差分を直近 1000 件だけ `updates` 表に残し、それより古い・不正な値なら `snapshot` を送る。送り直すときは本文を今の `comments` から組み立て、その間に非表示・削除されたものは送らない
@@ -141,11 +143,13 @@ API のパスは、広告・トラッカーブロッカーのフィルタリス�
 - 投稿者ごと非表示にした人の投稿は非表示のまま登録し、誰にも配信しない。本人には `comment.accepted` だけを返す（送り直しを止めるため）
 - モデレーション操作は HTTP の応答で最新のコメント一覧を返す。管理画面のコメント一覧は WebSocket では更新せず、開いたときと「最新にする」で読み込む
 - `like.changed` の `likedByMe` は、いいねを付け外した本人の接続にだけ付ける（他の人の状態は変わらないため）。状態が変わらない `like.set`（いいね済みへのいいね等）は何も配信しない
+- `reaction.changed` は `talkId` と 4 種類それぞれの票数を送る。自分の票（`mine`）は、投票した本人の接続にだけ付ける。状態が変わらない `reaction.set`（同じ感想への投票、票がないときの取り消し）は何も配信しない。存在しない発表への投票は `not_found` で拒否する
+- 感想はいいねと同じく連投上限の対象にしない。受付停止（`comments_open`）の影響も受けない
 - 自分のコメントへのいいねは `invalid_message`、他人のコメントの削除は `not_found` で拒否する。自分のコメントの削除は非表示と違い、コメントといいねを実際に消す
 - 送り直す差分は 1 件につき必ず 1 通にして `seq` を飛ばさない。その後に非表示・削除されたコメントの差分は `comment.removed` として送る
 - `event.updated` / `talks.updated` も `seq` を付けて `updates` 表に残し、送り直すときは送る時点のイベント情報・発表枠を入れる
 - 発表枠を削除したときは `talks.updated` だけを送り、クライアントは消えた発表のコメントを取り除く
-- アーカイブ済みのイベントにも今と同じく WebSocket で接続する（自分のコメントの削除と、管理者の非表示を反映するため）。`comment.post` と `like.set` は `archived` で拒否する。`snapshot` と `event.updated` には `archiveAt` を入れ、アーカイブを解除したときは `event.updated` を配信する。接続中に `archiveAt` を過ぎたときは、クライアントが自分で表示を切り替える
+- アーカイブ済みのイベントにも今と同じく WebSocket で接続する（自分のコメントの削除と、管理者の非表示を反映するため）。`comment.post`・`like.set`・`reaction.set` は `archived` で拒否する。`snapshot` と `event.updated` には `archiveAt` を入れ、アーカイブを解除したときは `event.updated` を配信する。接続中に `archiveAt` を過ぎたときは、クライアントが自分で表示を切り替える
 - イベントを削除したときは、全接続をコード `4404` で閉じる。クライアントは再接続せず「このイベントは削除されました」を出す
 
 ## スパム対策・セキュリティ

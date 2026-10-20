@@ -1,0 +1,14 @@
+/* 塗りつぶしたアイコンの中の線（Icon.tsx）。塗りの上に地の色で抜く */
+.detail,
+.solid {
+  fill: none;
+}
+
+svg[data-filled] .detail {
+  stroke: var(--surface);
+}
+
+svg[data-filled] .solid {
+  fill: var(--surface);
+  stroke: var(--surface);
+}
