@@ -557,6 +557,7 @@
 
 .keyName {
   font-weight: 700;
+  overflow-wrap: anywhere;
 }
 
 .keyMeta {

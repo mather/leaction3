@@ -17,6 +17,8 @@ export const DEFAULT_LIMITS = {
   hashtagMaxLength: 50,
   /** 同時に有効にできる共同管理者 URL の数 */
   managerKeysMaxCount: 20,
+  /** 共同管理者 URL の名前（渡す相手や用途）の最大文字数 */
+  managerKeyLabelMaxLength: 50,
   /** 削除したイベントを復元できる日数。過ぎたら全データを消す */
   deletedRetentionDays: 7,
 } as const satisfies Record<string, number>;
@@ -35,6 +37,7 @@ export const LIMIT_ENV_KEYS = {
   eventUrlMaxLength: "LIMIT_EVENT_URL_MAX_LENGTH",
   hashtagMaxLength: "LIMIT_HASHTAG_MAX_LENGTH",
   managerKeysMaxCount: "LIMIT_MANAGER_KEYS_MAX_COUNT",
+  managerKeyLabelMaxLength: "LIMIT_MANAGER_KEY_LABEL_MAX_LENGTH",
   deletedRetentionDays: "LIMIT_DELETED_RETENTION_DAYS",
 } as const satisfies Record<keyof Limits, string>;
 
@@ -158,6 +161,20 @@ export const AdminTokenSchema = v.pipe(v.string(), v.regex(/^[A-Za-z0-9_-]{43}$/
 export const createAdminSessionInputSchema = v.object({ token: AdminTokenSchema });
 
 export type CreateAdminSessionInput = v.InferInput<typeof createAdminSessionInputSchema>;
+
+/** 共同管理者 URL の発行（POST /api/rooms/:id/admin-keys）。label は渡す相手や用途で、無効化する URL を見分けるのに使う */
+export function createAdminKeyInputSchema(limits: Limits) {
+  return v.object({
+    label: v.pipe(
+      v.string(),
+      v.trim(),
+      v.minLength(1),
+      v.maxLength(limits.managerKeyLabelMaxLength),
+    ),
+  });
+}
+
+export type CreateAdminKeyInput = v.InferInput<ReturnType<typeof createAdminKeyInputSchema>>;
 
 /** 1 項目以上あること（変更した項目だけを送る API で、空の更新を受け付けない） */
 function nonEmptyPatch<T extends object>(o: T): boolean {
