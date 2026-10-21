@@ -187,10 +187,15 @@ function DeletedView(props: {
       <main class={styles.panel}>
         <section class={`${styles.card} ${styles.warnCard}`}>
           <h2 class={styles.sectionTitle}>このイベントは削除されています</h2>
+          <p class={styles.cardText}>参加者にはイベントページが表示されていません。</p>
+        </section>
+        <section class={styles.card}>
+          <h2 class={styles.sectionTitle}>イベントの復元について</h2>
           <p class={styles.cardText}>
-            参加者にはイベントページが表示されません。
             {dateTimeFormat.format(props.deletion.restorableUntil)}{" "}
-            まで復元できます。過ぎるとコメントを含むすべてのデータが消えます。
+            までは以下のボタンで復元できます。
+            <br />
+            期限を過ぎるとコメントを含むすべてのデータが消去され、復元できなくなります。
           </p>
           <button
             type="button"
@@ -206,6 +211,9 @@ function DeletedView(props: {
             </p>
           </Show>
         </section>
+        <A href="/" class={`${button.secondary} ${styles.topLink}`}>
+          トップページへ
+        </A>
       </main>
     </div>
   );
