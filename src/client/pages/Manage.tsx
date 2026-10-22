@@ -1181,6 +1181,7 @@ function AdminsTab(props: {
                 <Icon name="alert" />
                 この URL は今だけ表示されます。コピーして共同管理者に渡してください。
               </p>
+              <p class={styles.issuedLabel}>{issued().label}</p>
               <UrlField label={`発行した共同管理者 URL（${issued().label}）`} url={issued().url} />
             </div>
           )}

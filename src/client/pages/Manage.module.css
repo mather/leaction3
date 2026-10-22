@@ -533,6 +533,12 @@
   flex: none;
 }
 
+.issuedLabel {
+  margin: 0;
+  font-weight: 700;
+  overflow-wrap: anywhere;
+}
+
 .keys {
   display: grid;
   margin: 0;
