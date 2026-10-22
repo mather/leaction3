@@ -32,6 +32,12 @@ flowchart LR
 
 開発環境は Wrangler と Vite（Cloudflare Vite プラグイン）で、DO・D1 も含めてローカルで動かす。デプロイは GitHub Actions から行い、PR ごとにプレビューを出す現行の運用を引き継ぐ。main への push で本番にデプロイし、PR はプレビュー環境（`wrangler.jsonc` の `env.preview`。Worker `leaction-preview` と D1 `leaction-preview` で本番とデータを分ける）に上書きでデプロイする。プレビュー環境は全 PR で 1 つで、Turnstile はテスト用キーを使う。手順は README の「デプロイ」を参照。
 
+### ドメイン
+
+本番は独自ドメイン `leaction.net` だけで配信する（Workers の Custom Domain。`wrangler.jsonc` の `routes`）。`leaction.<サブドメイン>.workers.dev` は `workers_dev: false` で止める。Cookie（参加者 ID・管理セッション）はドメインごとに分かれ、共有 URL も開いているページのオリジンから作るので、同じイベントを 2 つのドメインで開かせないため。
+
+- プレビュー環境は workers.dev だけで配信する。`routes` と `workers_dev` は `env.preview` に継承されるので、`env.preview` では `"routes": []` と `"workers_dev": true` で打ち消す
+
 ## データモデル
 
 イベントの中身はすべてその EventRoom 内の SQLite に置き、D1 には全体の索引だけを置く。削除時はその DO をまるごと消せばコメントも残らない。

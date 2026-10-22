@@ -33,6 +33,14 @@ GitHub Actions で行います。本番は [`.github/workflows/production.yml`](
 - フォークからの PR では、プレビューはデプロイしません（シークレットを渡さないため）。チェックだけ実行します
 - 同じ PR に新しい push が来たら、古い実行は取り消されます
 
+### ドメイン
+
+本番は [leaction.net](https://leaction.net) で配信します（`wrangler.jsonc` の `routes` に Custom Domain として書いてあり、デプロイで設定されます）。
+
+- 本番の `leaction.<サブドメイン>.workers.dev` は止めています（`workers_dev: false`）
+- プレビュー環境は workers.dev だけで配信します
+- Turnstile のウィジェットの許可ホスト名には `leaction.net` を入れておきます
+
 ### 初回の設定
 
 1. Cloudflare で D1 を作り、`wrangler.jsonc` の `database_id`（本番とプレビューの 2 か所）を出力された ID に置き換える（作成済み）。`d1 create` がバインディングを追加するか聞いてきたら断る

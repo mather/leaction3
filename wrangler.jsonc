@@ -4,6 +4,9 @@
   "main": "src/worker/index.ts",
   "compatibility_date": "2026-08-15", // vitest-pool-workers 同梱の workerd が対応する日付までにする
   "observability": { "enabled": true },
+  // 本番は独自ドメインだけで配信し、workers.dev は止める（docs/architecture.md「ドメイン」）
+  "routes": [{ "pattern": "leaction.net", "custom_domain": true }],
+  "workers_dev": false,
   // 静的アセット（SPA）は @cloudflare/vite-plugin がビルド結果を配信する。
   // /api/* と /e/*（OGP の差し込み、OGP 画像）は常に Worker で処理し、それ以外で見つからないパスは index.html を返す。
   // / などの画面も Worker を通し、og:image を絶対 URL にする（src/worker/ogp.ts）。
@@ -34,6 +37,9 @@
   // シークレットは `wrangler secret put <名前> --env preview` で別に設定する。
   "env": {
     "preview": {
+      // routes と workers_dev は継承されるので打ち消す（プレビューは workers.dev だけで配信する）
+      "routes": [],
+      "workers_dev": true,
       "d1_databases": [
         {
           "binding": "DB",

@@ -149,7 +149,7 @@ MVP（最初のリリース）は、現行の機能に秘密 URL 管理とモデ
 
 ## 未決事項
 
-- [ ] ドメイン名（モックアップでは仮に leaction.example）
+- [x] ドメイン名 → `leaction.net`。本番の workers.dev は止める（[architecture.md](architecture.md)「ドメイン」）
 - [ ] 旧サービス（leaction.web.app）を止めるか残すか、止めるなら告知の方法
 - [ ] 「発表中」の設定を MVP に入れるか
 - [x] スタイルの書き方 → CSS Modules
