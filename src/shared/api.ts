@@ -13,6 +13,7 @@ export type ErrorResponse = {
 };
 
 export type {
+  CreateAdminKeyInput as CreateAdminKeyRequest,
   CreateAdminSessionInput as CreateAdminSessionRequest,
   CreateEventInput as CreateEventRequest,
   CreateSessionInput as CreateSessionRequest,
@@ -78,6 +79,8 @@ export type DeleteEventResponse = {
 /** 共同管理者 URL（管理キー）の 1 件。トークンは発行時にしか返さない */
 export type AdminKey = {
   id: string;
+  /** 発行時に付けた名前（渡す相手や用途） */
+  label: string;
   /** UNIX エポックからのミリ秒 */
   createdAt: number;
   /** 無効化した時刻。有効なら null */

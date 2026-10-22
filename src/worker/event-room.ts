@@ -91,6 +91,7 @@ CREATE TABLE IF NOT EXISTS reactions (
 CREATE TABLE IF NOT EXISTS admin_keys (
   id TEXT PRIMARY KEY,
   role TEXT NOT NULL CHECK (role IN ('owner', 'manager')),
+  label TEXT NOT NULL DEFAULT '',
   token_hash TEXT NOT NULL UNIQUE,
   created_at INTEGER NOT NULL,
   revoked_at INTEGER
@@ -141,6 +142,20 @@ type CommentRow = {
   likes: number;
   liked_by_me: number;
 };
+
+/**
+ * SCHEMA を作った後に足した列。CREATE TABLE IF NOT EXISTS では既存の表に列が増えないので、
+ * 作成済みのインスタンスにはここで ALTER TABLE する
+ */
+export function migrate(sql: SqlStorage): void {
+  const hasLabel =
+    sql
+      .exec<{ count: number }>(
+        "SELECT COUNT(*) AS count FROM pragma_table_info('admin_keys') WHERE name = 'label'",
+      )
+      .one().count > 0;
+  if (!hasLabel) sql.exec("ALTER TABLE admin_keys ADD COLUMN label TEXT NOT NULL DEFAULT ''");
+}
 
 /** 表示中のコメントを、閲覧者（viewer）から見た形で引く。条件は WHERE 句に AND でつなぐ */
 const COMMENT_SELECT = `
@@ -205,6 +220,7 @@ export class EventRoom extends DurableObject<Env> {
     ctx.setWebSocketAutoResponse(new WebSocketRequestResponsePair(WS_PING, WS_PONG));
     ctx.blockConcurrencyWhile(async () => {
       ctx.storage.sql.exec(SCHEMA);
+      migrate(ctx.storage.sql);
       this.seq = ctx.storage.sql
         .exec<{ seq: number }>("SELECT COALESCE(MAX(seq), 0) AS seq FROM updates")
         .one().seq;
@@ -330,7 +346,11 @@ export class EventRoom extends DurableObject<Env> {
   }
 
   /** 共同管理者 URL を発行する。トークンは Worker が作り、ハッシュだけを受け取って保存する */
-  async createAdminKey(keyId: string, tokenHash: string): Promise<AdminResult<AdminKey>> {
+  async createAdminKey(
+    keyId: string,
+    label: string,
+    tokenHash: string,
+  ): Promise<AdminResult<AdminKey>> {
     const error = this.ownerError(keyId);
     if (error) return fail(error);
     const sql = this.ctx.storage.sql;
@@ -340,10 +360,11 @@ export class EventRoom extends DurableObject<Env> {
       )
       .one().count;
     if (active >= this.limits.managerKeysMaxCount) return fail("conflict");
-    const key: AdminKey = { id: randomId(), createdAt: Date.now(), revokedAt: null };
+    const key: AdminKey = { id: randomId(), label, createdAt: Date.now(), revokedAt: null };
     sql.exec(
-      "INSERT INTO admin_keys (id, role, token_hash, created_at) VALUES (?, 'manager', ?, ?)",
+      "INSERT INTO admin_keys (id, role, label, token_hash, created_at) VALUES (?, 'manager', ?, ?, ?)",
       key.id,
+      key.label,
       tokenHash,
       key.createdAt,
     );
@@ -457,11 +478,16 @@ export class EventRoom extends DurableObject<Env> {
 
   private readAdminKeys(): AdminKey[] {
     return this.ctx.storage.sql
-      .exec<{ id: string; created_at: number; revoked_at: number | null }>(
-        "SELECT id, created_at, revoked_at FROM admin_keys WHERE role = 'manager' ORDER BY created_at DESC, rowid DESC",
+      .exec<{ id: string; label: string; created_at: number; revoked_at: number | null }>(
+        "SELECT id, label, created_at, revoked_at FROM admin_keys WHERE role = 'manager' ORDER BY created_at DESC, rowid DESC",
       )
       .toArray()
-      .map((row) => ({ id: row.id, createdAt: row.created_at, revokedAt: row.revoked_at }));
+      .map((row) => ({
+        id: row.id,
+        label: row.label,
+        createdAt: row.created_at,
+        revokedAt: row.revoked_at,
+      }));
   }
 
   /**

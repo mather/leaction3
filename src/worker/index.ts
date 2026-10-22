@@ -18,6 +18,7 @@ import type {
   UpdateEventResponse,
 } from "../shared/api";
 import {
+  createAdminKeyInputSchema,
   createAdminSessionInputSchema,
   createEventInputSchema,
   createSessionInputSchema,
@@ -334,9 +335,11 @@ api.get("/rooms/:id/admin-keys", requireAdmin, async (c) => {
 });
 
 api.post("/rooms/:id/admin-keys", requireAdmin, async (c) => {
+  const input = await parseBody(c, createAdminKeyInputSchema(resolveLimits(c.env)));
+  if (!input) return c.json<ErrorResponse>({ error: "invalid_input" }, 400);
   const token = generateToken();
   const room = c.env.EVENT_ROOM.getByName(c.req.param("id"));
-  const result = await room.createAdminKey(c.var.keyId, await hashToken(token));
+  const result = await room.createAdminKey(c.var.keyId, input.label, await hashToken(token));
   return adminResponse(c, result, (key): CreateAdminKeyResponse => ({ key, token }));
 });
 

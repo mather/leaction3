@@ -9,6 +9,7 @@ import type {
   GetAdminResponse,
 } from "../src/shared/api";
 import { WS_CLOSE_EVENT_DELETED } from "../src/shared/protocol";
+import { migrate } from "../src/worker/event-room";
 import {
   adminCookie,
   connect,
@@ -23,8 +24,12 @@ import {
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 
-async function issueKey(id: string, cookie: string) {
-  const res = await request(`/api/rooms/${id}/admin-keys`, { method: "POST", cookie });
+async function issueKey(id: string, cookie: string, label = "運営 佐藤さん") {
+  const res = await request(`/api/rooms/${id}/admin-keys`, {
+    method: "POST",
+    cookie,
+    body: { label },
+  });
   expect(res.status).toBe(200);
   return res.json<CreateAdminKeyResponse>();
 }
@@ -56,7 +61,7 @@ describe("共同管理者 URL", () => {
     const { id, cookie } = await setupAdmin();
     const { key, token } = await issueKey(id, cookie);
     expect(token).toMatch(/^[A-Za-z0-9_-]{43}$/);
-    expect(key).toMatchObject({ revokedAt: null });
+    expect(key).toMatchObject({ label: "運営 佐藤さん", revokedAt: null });
 
     const session = await postAdminSession(id, token);
     expect(await session.json<AdminSessionResponse>()).toEqual({ role: "manager" });
@@ -80,13 +85,34 @@ describe("共同管理者 URL", () => {
 
   it("一覧は共同管理者 URL だけを新しい順に返し、トークンは含めない", async () => {
     const { id, cookie } = await setupAdmin();
-    const first = await issueKey(id, cookie);
-    const second = await issueKey(id, cookie);
+    const first = await issueKey(id, cookie, "配信担当");
+    const second = await issueKey(id, cookie, "  受付  ");
+    expect(second.key.label).toBe("受付");
     const res = await request(`/api/rooms/${id}/admin-keys`, { cookie });
     expect(res.status).toBe(200);
     const { keys } = await res.json<AdminKeysResponse>();
     expect(keys).toEqual([second.key, first.key]);
     expect(JSON.stringify(keys)).not.toContain(first.token);
+  });
+
+  it("名前がない・空白だけ・長すぎるなら 400", async () => {
+    const { id, cookie } = await setupAdmin();
+    for (const body of [undefined, {}, { label: "   " }, { label: "あ".repeat(51) }]) {
+      const res = await request(`/api/rooms/${id}/admin-keys`, { method: "POST", cookie, body });
+      expect(res.status, JSON.stringify(body)).toBe(400);
+    }
+    expect((await issueKey(id, cookie, "あ".repeat(50))).key.label).toHaveLength(50);
+  });
+
+  it("名前の列がない既存のインスタンスには列を足し、発行済みの URL は名前が空になる", async () => {
+    const { id, cookie, managerKey } = await setup();
+    await runInDurableObject(env.EVENT_ROOM.getByName(id), (_, state) => {
+      state.storage.sql.exec("ALTER TABLE admin_keys DROP COLUMN label");
+      migrate(state.storage.sql);
+      migrate(state.storage.sql);
+    });
+    const res = await request(`/api/rooms/${id}/admin-keys`, { cookie });
+    expect((await res.json<AdminKeysResponse>()).keys).toEqual([{ ...managerKey, label: "" }]);
   });
 
   it("無効化すると、その URL の管理セッションはすぐに使えなくなり、URL からも入れない", async () => {
@@ -141,7 +167,11 @@ describe("共同管理者 URL", () => {
         );
       }
     });
-    const res = await request(`/api/rooms/${id}/admin-keys`, { method: "POST", cookie });
+    const res = await request(`/api/rooms/${id}/admin-keys`, {
+      method: "POST",
+      cookie,
+      body: { label: "21 件目" },
+    });
     expect(res.status).toBe(409);
   });
 
@@ -149,13 +179,13 @@ describe("共同管理者 URL", () => {
     const { id, manager, managerKey } = await setup();
     const forbidden = [
       ["GET", `/api/rooms/${id}/admin-keys`],
-      ["POST", `/api/rooms/${id}/admin-keys`],
+      ["POST", `/api/rooms/${id}/admin-keys`, { label: "共同管理者が発行" }],
       ["DELETE", `/api/rooms/${id}/admin-keys/${managerKey.id}`],
       ["DELETE", `/api/rooms/${id}`],
       ["POST", `/api/rooms/${id}/restore`],
     ] as const;
-    for (const [method, path] of forbidden) {
-      const res = await request(path, { method, cookie: manager });
+    for (const [method, path, body] of forbidden) {
+      const res = await request(path, { method, cookie: manager, body });
       expect(res.status, `${method} ${path}`).toBe(403);
     }
     expect(await readIndex(id)).toEqual({ deleted_at: null });
@@ -166,6 +196,7 @@ describe("共同管理者 URL", () => {
     const evil = await request(`/api/rooms/${id}/admin-keys`, {
       method: "POST",
       cookie,
+      body: { label: "x" },
       origin: "https://evil.example",
     });
     expect(evil.status).toBe(403);

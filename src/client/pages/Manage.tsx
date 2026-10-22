@@ -1098,7 +1098,7 @@ function InfoTab(props: {
 }
 
 /** 発行した直後の共同管理者 URL */
-type IssuedKey = { keyId: string; url: string };
+type IssuedKey = { keyId: string; label: string; url: string };
 
 /** 管理者タブ（作成者だけ）。共同管理者 URL の発行・無効化と、イベントの削除 */
 function AdminsTab(props: {
@@ -1120,13 +1120,20 @@ function AdminsTab(props: {
   };
   void load();
 
+  // 発行のシート。名前（渡す相手や用途）を入れてから発行する
+  const [issueOpen, setIssueOpen] = createSignal(false);
+  const [newLabel, setNewLabel] = createSignal("");
   const [issuing, setIssuing] = createSignal(false);
+  const canIssue = () => !issuing() && newLabel().trim() !== "";
   const issue = async () => {
+    if (!canIssue()) return;
     setIssuing(true);
     try {
-      const { key, token } = await createAdminKey(props.eventId);
+      const { key, token } = await createAdminKey(props.eventId, { label: newLabel() });
       setKeys((list) => [key, ...(list ?? [])]);
-      props.onIssued({ keyId: key.id, url: manageUrl(props.eventId, token) });
+      props.onIssued({ keyId: key.id, label: key.label, url: manageUrl(props.eventId, token) });
+      setIssueOpen(false);
+      setNewLabel("");
     } catch (err) {
       props.showToast(
         "error",
@@ -1164,8 +1171,8 @@ function AdminsTab(props: {
     }
   };
 
-  /** 一覧での呼び名。発行順に番号を振る（一覧は新しい順） */
-  const keyLabel = (index: number) => `共同管理者 URL ${(keys()?.length ?? 0) - index}`;
+  /** 一覧での呼び名。名前の入力を必須にする前に発行した URL は名前が空 */
+  const keyLabel = (key: AdminKey) => key.label || "（名前なし）";
 
   return (
     <>
@@ -1182,18 +1189,14 @@ function AdminsTab(props: {
                 <Icon name="alert" />
                 この URL は今だけ表示されます。コピーして共同管理者に渡してください。
               </p>
-              <UrlField label="発行した共同管理者 URL" url={issued().url} />
+              <p class={styles.issuedLabel}>{issued().label}</p>
+              <UrlField label={`発行した共同管理者 URL（${issued().label}）`} url={issued().url} />
             </div>
           )}
         </Show>
-        <button
-          type="button"
-          class={button.secondary}
-          disabled={issuing()}
-          onClick={() => void issue()}
-        >
+        <button type="button" class={button.secondary} onClick={() => setIssueOpen(true)}>
           <Icon name="plus" />
-          {issuing() ? "発行しています…" : "新しい共同管理者 URL を発行"}
+          新しい共同管理者 URL を発行
         </button>
         <Show
           when={keys()}
@@ -1206,10 +1209,10 @@ function AdminsTab(props: {
             >
               <ul class={styles.keys}>
                 <For each={list()}>
-                  {(key, i) => (
+                  {(key) => (
                     <li class={styles.key} data-revoked={key.revokedAt !== null ? "" : undefined}>
                       <span class={styles.keyInfo}>
-                        <span class={styles.keyName}>{keyLabel(i())}</span>
+                        <span class={styles.keyName}>{keyLabel(key)}</span>
                         <span class={styles.keyMeta}>
                           {dateTimeFormat.format(key.createdAt)} 発行
                           {key.revokedAt !== null &&
@@ -1247,11 +1250,43 @@ function AdminsTab(props: {
         </button>
       </section>
 
+      <Sheet open={issueOpen()} onClose={() => setIssueOpen(false)} title="共同管理者 URL を発行">
+        <form
+          class={styles.sheetForm}
+          onSubmit={(e) => {
+            e.preventDefault();
+            void issue();
+          }}
+        >
+          <label class={styles.field}>
+            <span class={styles.label}>名前</span>
+            <input
+              class={styles.input}
+              type="text"
+              required
+              placeholder="例: 運営 佐藤さん、配信担当"
+              maxLength={DEFAULT_LIMITS.managerKeyLabelMaxLength}
+              value={newLabel()}
+              onInput={(e) => setNewLabel(e.currentTarget.value)}
+            />
+          </label>
+          <p class={styles.sheetNote}>
+            渡す相手や用途を入れてください。一覧に表示され、無効化する URL を見分けるのに使います。
+          </p>
+          <button type="submit" class={button.primary} disabled={!canIssue()}>
+            {issuing() ? "発行しています…" : "発行する"}
+          </button>
+        </form>
+      </Sheet>
+
       <Sheet
         open={revokeTarget() !== undefined}
         onClose={() => setRevokeTarget(undefined)}
         title="この共同管理者 URL を無効化しますか？"
       >
+        <Show when={revokeTarget()}>
+          {(key) => <p class={styles.deletePreview}>{keyLabel(key())}</p>}
+        </Show>
         <p class={styles.deleteNote}>
           この URL から開いている管理画面も、すぐに使えなくなります。無効化は取り消せません。
         </p>

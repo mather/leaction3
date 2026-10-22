@@ -62,7 +62,7 @@ flowchart LR
 | `comments` | `id`, `talk_id`, `author_id`, `body`, `kind`, `hidden`, `created_at` | `kind` は将来の質問区別用、当面は `comment` 固定 |
 | `likes` | `comment_id`, `voter_id`, `created_at` | 主キーを `(comment_id, voter_id)` にして二重いいねを防ぐ |
 | `reactions` | `talk_id`, `voter_id`, `kind`, `created_at`, `updated_at` | 発表への感想。主キーを `(talk_id, voter_id)` にして 1 人 1 票にし、付け替えは `kind` の更新で行う。`kind` は `useful` / `fun` / `try` / `more` |
-| `admin_keys` | `id`, `role`（owner / manager）, `token_hash`, `created_at`, `revoked_at` | owner は 1 件、manager は複数 |
+| `admin_keys` | `id`, `role`（owner / manager）, `label`, `token_hash`, `created_at`, `revoked_at` | owner は 1 件、manager は複数。`label` は共同管理者 URL の名前（渡す相手や用途）で、owner は空文字 |
 | `hidden_authors` | `author_id`, `created_at` | 一括非表示した投稿者。以降の投稿も非表示にする |
 | `author_keys` | `author_id`, `key`, `created_at` | 管理画面で投稿者を表すキー（乱数）。参加者 ID は管理者にも見せない |
 
@@ -103,8 +103,8 @@ flowchart LR
 | `GET /api/rooms/:id/admin/comments` | 管理 | コメント一覧（非表示も含む、新しい順）。投稿者は `author_keys` のキーで表す |
 | `POST /api/rooms/:id/comments/:cid/hide`（と `unhide`） | 管理 | コメントの非表示・再表示 |
 | `POST /api/rooms/:id/authors/:aid/hide`（と `unhide`） | 管理 | 投稿者単位の一括非表示と、その解除（`:aid` は投稿者のキー）。解除するとその投稿者の非表示のコメントをすべて表示に戻す |
-| `GET /api/rooms/:id/admin-keys` | 作成者 | 共同管理者 URL の一覧（発行日・無効化日時。トークンは含めない） |
-| `POST` / `DELETE /api/rooms/:id/admin-keys[/:keyId]` | 作成者 | 共同管理者 URL の発行・無効化。発行時だけトークンを返す。有効な URL は上限（初期値 20）まで |
+| `GET /api/rooms/:id/admin-keys` | 作成者 | 共同管理者 URL の一覧（名前・発行日・無効化日時。トークンは含めない） |
+| `POST` / `DELETE /api/rooms/:id/admin-keys[/:keyId]` | 作成者 | 共同管理者 URL の発行・無効化。発行時は名前（`label`、必須・50 文字まで）を受け取り、トークンはこのときだけ返す。有効な URL は上限（初期値 20）まで |
 | `DELETE /api/rooms/:id`（と `POST .../restore`） | 作成者 | 論理削除と復元。復元は期限（7 日）内だけで、過ぎていれば 404 |
 | `POST /api/rooms/:id/unarchive` | 作成者 | アーカイブの解除。アーカイブ済みでなければ 409 |
 | `POST /api/footprints` | 誰でも（同じオリジン） | アクセス解析の計測をまとめて送る。常に 204。[analytics.md](analytics.md) を参照 |

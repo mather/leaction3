@@ -3,6 +3,7 @@ import type {
   AdminCommentsResponse,
   AdminKeysResponse,
   AdminSessionResponse,
+  CreateAdminKeyRequest,
   CreateAdminKeyResponse,
   CreateAdminSessionRequest,
   CreateEventRequest,
@@ -146,8 +147,11 @@ export function getAdminKeys(id: string): Promise<AdminKeysResponse> {
 }
 
 /** 共同管理者 URL を発行する。トークンはこの応答でしか受け取れない */
-export function createAdminKey(id: string): Promise<CreateAdminKeyResponse> {
-  return request(`${eventPath(id)}/admin-keys`, { method: "POST" });
+export function createAdminKey(
+  id: string,
+  input: CreateAdminKeyRequest,
+): Promise<CreateAdminKeyResponse> {
+  return request(`${eventPath(id)}/admin-keys`, { method: "POST", body: JSON.stringify(input) });
 }
 
 /** 共同管理者 URL を無効化する。結果として最新の一覧が返る */
