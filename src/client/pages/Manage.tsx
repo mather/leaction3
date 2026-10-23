@@ -11,7 +11,8 @@ import {
   Show,
   Switch,
 } from "solid-js";
-import { createStore, reconcile } from "solid-js/store";
+import { createStore, reconcile, unwrap } from "solid-js/store";
+import * as v from "valibot";
 import type {
   AdminComment,
   AdminKey,
@@ -21,7 +22,14 @@ import type {
   UpdateEventRequest,
 } from "../../shared/api";
 import type { EventInfo, Talk, TalkId } from "../../shared/protocol";
-import { DEFAULT_LIMITS, isValidTalk } from "../../shared/schema";
+import {
+  DEFAULT_LIMITS,
+  HASHTAGS_INPUT_MAX_LENGTH,
+  isValidTalk,
+  splitHashtags,
+  uniqueHashtags,
+  updateEventInputSchema,
+} from "../../shared/schema";
 import button from "../components/button.module.css";
 import { Icon } from "../components/Icon";
 import { Sheet } from "../components/Sheet";
@@ -467,7 +475,9 @@ function ManageView(props: {
                     // その後に書き換えられていない項目だけを戻す
                     return () => {
                       for (const key of changed) {
-                        if (store.event[key] === patch[key]) setStore("event", key, before[key]);
+                        // ハッシュタグの配列はストアのプロキシ越しだと別物になるので、元の値で比べる
+                        if (unwrap(store.event)[key] === patch[key])
+                          setStore("event", key, before[key]);
                       }
                     };
                   },
@@ -1018,11 +1028,17 @@ function CommentsTab(props: {
 }
 
 /** 基本情報の入力値を、API に送る値にする。空の任意項目は null */
-function normalize(field: keyof UpdateEventRequest, value: string): string | null {
+function normalize(field: "name" | "date" | "url", value: string): string | null {
   const trimmed = value.trim();
-  if (field === "hashtag") return trimmed.replace(/^[#＃]/, "") || null;
   if (field === "url") return trimmed || null;
   return trimmed;
+}
+
+const updateEventSchema = updateEventInputSchema(DEFAULT_LIMITS);
+
+/** ハッシュタグを入力欄に出す形にする（「#ltkai #frontend」） */
+function formatHashtags(tags: readonly string[]): string {
+  return tags.map((t) => `#${t}`).join(" ");
 }
 
 function InfoTab(props: {
@@ -1032,7 +1048,7 @@ function InfoTab(props: {
 }) {
   // フォーカスが外れたとき（change）に、変わった項目だけを保存する
   const change =
-    (field: keyof UpdateEventRequest) => (e: Event & { currentTarget: HTMLInputElement }) => {
+    (field: "name" | "date" | "url") => (e: Event & { currentTarget: HTMLInputElement }) => {
       const input = e.currentTarget;
       const value = normalize(field, input.value);
       if (value === props.event[field]) return;
@@ -1045,6 +1061,21 @@ function InfoTab(props: {
       }
       props.onSave({ [field]: value });
     };
+  const changeHashtags = (e: Event & { currentTarget: HTMLInputElement }) => {
+    const input = e.currentTarget;
+    const hashtags = uniqueHashtags(splitHashtags(input.value));
+    if (!v.is(updateEventSchema, { hashtags })) {
+      props.onReject(
+        `ハッシュタグは ${DEFAULT_LIMITS.hashtagsMaxCount} 個まで、1 つ ${DEFAULT_LIMITS.hashtagMaxLength} 文字までです`,
+      );
+      input.value = formatHashtags(props.event.hashtags);
+      return;
+    }
+    // 区切り方だけ変えたときも、保存する形に揃えて見せる
+    input.value = formatHashtags(hashtags);
+    if (hashtags.join(" ") === props.event.hashtags.join(" ")) return;
+    props.onSave({ hashtags });
+  };
 
   return (
     <div class={styles.card}>
@@ -1083,14 +1114,16 @@ function InfoTab(props: {
         />
       </label>
       <label class={styles.field}>
-        <span class={styles.label}>ハッシュタグ</span>
+        <span class={styles.label}>
+          ハッシュタグ（空白で区切って {DEFAULT_LIMITS.hashtagsMaxCount} 個まで）
+        </span>
         <input
           class={styles.input}
           type="text"
-          maxLength={DEFAULT_LIMITS.hashtagMaxLength + 1}
-          placeholder="#ltkai"
-          value={props.event.hashtag ? `#${props.event.hashtag}` : ""}
-          onChange={change("hashtag")}
+          maxLength={HASHTAGS_INPUT_MAX_LENGTH}
+          placeholder="#ltkai #frontend"
+          value={formatHashtags(props.event.hashtags)}
+          onChange={changeHashtags}
         />
       </label>
     </div>

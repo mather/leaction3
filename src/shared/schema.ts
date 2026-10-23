@@ -14,7 +14,10 @@ export const DEFAULT_LIMITS = {
   speakerMaxLength: 50,
   talksMaxCount: 50,
   eventUrlMaxLength: 500,
+  /** ハッシュタグ 1 つの最大文字数（# を除く） */
   hashtagMaxLength: 50,
+  /** イベントに付けられるハッシュタグの数（コラボイベントなどで複数使う） */
+  hashtagsMaxCount: 5,
   /** 同時に有効にできる共同管理者 URL の数 */
   managerKeysMaxCount: 20,
   /** 共同管理者 URL の名前（渡す相手や用途）の最大文字数 */
@@ -22,6 +25,10 @@ export const DEFAULT_LIMITS = {
   /** 削除したイベントを復元できる日数。過ぎたら全データを消す */
   deletedRetentionDays: 7,
 } as const satisfies Record<string, number>;
+
+/** ハッシュタグの入力欄の最大文字数（各タグの # と区切りの空白を含む） */
+export const HASHTAGS_INPUT_MAX_LENGTH =
+  (DEFAULT_LIMITS.hashtagMaxLength + 2) * DEFAULT_LIMITS.hashtagsMaxCount;
 
 export type Limits = { -readonly [K in keyof typeof DEFAULT_LIMITS]: number };
 
@@ -36,6 +43,7 @@ export const LIMIT_ENV_KEYS = {
   talksMaxCount: "LIMIT_TALKS_MAX_COUNT",
   eventUrlMaxLength: "LIMIT_EVENT_URL_MAX_LENGTH",
   hashtagMaxLength: "LIMIT_HASHTAG_MAX_LENGTH",
+  hashtagsMaxCount: "LIMIT_HASHTAGS_MAX_COUNT",
   managerKeysMaxCount: "LIMIT_MANAGER_KEYS_MAX_COUNT",
   managerKeyLabelMaxLength: "LIMIT_MANAGER_KEY_LABEL_MAX_LENGTH",
   deletedRetentionDays: "LIMIT_DELETED_RETENTION_DAYS",
@@ -74,6 +82,19 @@ const DateSchema = v.pipe(
   }),
 );
 
+/** ハッシュタグの区切り。空白・読点・カンマのほか、続けて書いた # でも区切る */
+const HASHTAG_SEPARATOR = /[\s,，、#＃]+/u;
+
+/** ハッシュタグの入力欄の文字列を、# を除いたタグの並びにする（「#ltkai #collab」→ ["ltkai", "collab"]） */
+export function splitHashtags(text: string): string[] {
+  return text.split(HASHTAG_SEPARATOR).filter((t) => t !== "");
+}
+
+/** 大文字小文字だけが違うタグを除く（X のハッシュタグは大文字小文字を区別しない）。先に出たほうを残す */
+export function uniqueHashtags(tags: string[]): string[] {
+  return tags.filter((t, i) => tags.findIndex((u) => u.toLowerCase() === t.toLowerCase()) === i);
+}
+
 /** 空文字は null として扱う項目（null で消せる） */
 function nullableText<T extends v.GenericSchema<string, string>>(schema: T) {
   return v.pipe(
@@ -99,12 +120,19 @@ function eventFields(limits: Limits) {
       v.url(),
       v.regex(/^https?:\/\//i),
     ),
-    hashtag: v.pipe(
-      v.string(),
-      v.transform((s) => s.replace(/^[#＃]/, "")),
-      v.minLength(1),
-      v.maxLength(limits.hashtagMaxLength),
-      v.regex(/^[^\s#＃]+$/u),
+    /** ハッシュタグの並び。各タグの先頭の # は除く。空の配列で消す */
+    hashtags: v.pipe(
+      v.array(
+        v.pipe(
+          v.string(),
+          v.transform((s) => s.replace(/^[#＃]/, "")),
+          v.minLength(1),
+          v.maxLength(limits.hashtagMaxLength),
+          v.regex(/^[^\s,，、#＃]+$/u),
+        ),
+      ),
+      v.transform(uniqueHashtags),
+      v.maxLength(limits.hashtagsMaxCount),
     ),
     speaker: v.pipe(v.string(), v.trim(), v.maxLength(limits.speakerMaxLength)),
     title: v.pipe(v.string(), v.trim(), v.maxLength(limits.talkTitleMaxLength)),
@@ -132,7 +160,7 @@ export function createEventInputSchema(limits: Limits) {
     name: f.name,
     date: f.date,
     url: optionalText(f.url),
-    hashtag: optionalText(f.hashtag),
+    hashtags: v.optional(f.hashtags, []),
     talks: v.pipe(
       v.array(talkInputSchema(limits)),
       v.minLength(1),
@@ -182,7 +210,7 @@ function nonEmptyPatch<T extends object>(o: T): boolean {
 }
 
 /**
- * イベント情報の更新（PATCH /api/rooms/:id）。変更した項目だけを送る。URL・ハッシュタグは null か空文字で消す。
+ * イベント情報の更新（PATCH /api/rooms/:id）。変更した項目だけを送る。URL は null か空文字で、ハッシュタグは空の配列で消す。
  * コメント受付の一時停止もここで切り替える
  */
 export function updateEventInputSchema(limits: Limits) {
@@ -192,7 +220,7 @@ export function updateEventInputSchema(limits: Limits) {
       name: v.optional(f.name),
       date: v.optional(f.date),
       url: v.optional(nullableText(f.url)),
-      hashtag: v.optional(nullableText(f.hashtag)),
+      hashtags: v.optional(f.hashtags),
       /** コメントの受付。false で一時停止する */
       commentsOpen: v.optional(v.boolean()),
     }),
