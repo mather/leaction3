@@ -46,6 +46,7 @@ CREATE TABLE IF NOT EXISTS event (
   name TEXT NOT NULL,
   date TEXT NOT NULL,
   url TEXT,
+  -- ハッシュタグ（# なし）を空白区切りで持つ。なければ NULL
   hashtag TEXT,
   comments_open INTEGER NOT NULL DEFAULT 1,
   live_talk_id TEXT,
@@ -157,6 +158,11 @@ export function migrate(sql: SqlStorage): void {
   if (!hasLabel) sql.exec("ALTER TABLE admin_keys ADD COLUMN label TEXT NOT NULL DEFAULT ''");
 }
 
+/** ハッシュタグを event.hashtag の形（空白区切り、なければ NULL）にする */
+function joinHashtags(tags: readonly string[]): string | null {
+  return tags.length > 0 ? tags.join(" ") : null;
+}
+
 /** 表示中のコメントを、閲覧者（viewer）から見た形で引く。条件は WHERE 句に AND でつなぐ */
 const COMMENT_SELECT = `
 SELECT c.id, c.talk_id, c.author_id, c.client_id, c.body, c.created_at,
@@ -259,7 +265,7 @@ export class EventRoom extends DurableObject<Env> {
           event.name,
           event.date,
           event.url,
-          event.hashtag,
+          joinHashtags(event.hashtags),
           now,
         );
         event.talks.forEach((talk, i) => {
@@ -498,9 +504,10 @@ export class EventRoom extends DurableObject<Env> {
     if (!this.adminRole(keyId)) return fail("unauthorized");
     const sql = this.ctx.storage.sql;
     const values: Record<string, string | number | null> = {};
-    for (const key of ["name", "date", "url", "hashtag"] as const) {
+    for (const key of ["name", "date", "url"] as const) {
       if (patch[key] !== undefined) values[key] = patch[key];
     }
+    if (patch.hashtags !== undefined) values.hashtag = joinHashtags(patch.hashtags);
     if (patch.commentsOpen !== undefined) values.comments_open = patch.commentsOpen ? 1 : 0;
     const columns = Object.keys(values);
     this.ctx.storage.transactionSync(() => {
@@ -811,7 +818,7 @@ export class EventRoom extends DurableObject<Env> {
         name: row.name,
         date: row.date,
         url: row.url,
-        hashtag: row.hashtag,
+        hashtags: row.hashtag?.split(" ") ?? [],
         commentsOpen: row.comments_open === 1,
       },
       talks,

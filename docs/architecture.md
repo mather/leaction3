@@ -57,7 +57,7 @@ flowchart LR
 
 | テーブル | 主な列 | 備考 |
 | --- | --- | --- |
-| `event` | `name`, `date`, `url`, `hashtag`, `comments_open`, `live_talk_id`, `archive_after`, `deleted_at` | 1 行のみ。`archive_after` はアーカイブを解除したときだけ入れる |
+| `event` | `name`, `date`, `url`, `hashtag`, `comments_open`, `live_talk_id`, `archive_after`, `deleted_at` | 1 行のみ。`hashtag` は # を除いたハッシュタグを空白区切りで持つ（複数可、なければ NULL。API では配列 `hashtags`）。`archive_after` はアーカイブを解除したときだけ入れる |
 | `talks` | `id`, `position`, `speaker`, `title` | `position` で並べ替え |
 | `comments` | `id`, `talk_id`, `author_id`, `body`, `kind`, `hidden`, `created_at` | `kind` は将来の質問区別用、当面は `comment` 固定 |
 | `likes` | `comment_id`, `voter_id`, `created_at` | 主キーを `(comment_id, voter_id)` にして二重いいねを防ぐ |

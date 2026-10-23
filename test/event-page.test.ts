@@ -13,7 +13,7 @@ async function createEvent(name = "LT 会 #1") {
       name,
       date: "2026-10-01",
       url: "https://example.com/lt",
-      hashtag: "ltkai",
+      hashtags: ["ltkai", "collab"],
       talks: [
         { speaker: "山田", title: "SolidJS 入門" },
         { speaker: "佐藤", title: "" },
@@ -34,7 +34,7 @@ describe("GET /api/rooms/:id", () => {
       name: "LT 会 #1",
       date: "2026-10-01",
       url: "https://example.com/lt",
-      hashtag: "ltkai",
+      hashtags: ["ltkai", "collab"],
       commentsOpen: true,
     });
     expect(body.talks.map(({ speaker, title }) => ({ speaker, title }))).toEqual([
