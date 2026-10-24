@@ -109,11 +109,15 @@ describe("PATCH /api/rooms/:id", () => {
     const res = await request(`/api/rooms/${id}`, {
       method: "PATCH",
       cookie,
-      body: { name: " 新しい名前 ", hashtag: "#newtag" },
+      body: { name: " 新しい名前 ", hashtags: ["#newtag", "collab"] },
     });
     expect(res.status).toBe(200);
     const { event } = await res.json<UpdateEventResponse>();
-    expect(event).toMatchObject({ name: "新しい名前", date: "2026-10-01", hashtag: "newtag" });
+    expect(event).toMatchObject({
+      name: "新しい名前",
+      date: "2026-10-01",
+      hashtags: ["newtag", "collab"],
+    });
 
     const updated = await expectType(ws, "event.updated");
     expect(updated).toEqual({ type: "event.updated", seq: 1, event });
@@ -124,20 +128,20 @@ describe("PATCH /api/rooms/:id", () => {
     expect(indexed).toEqual({ name: "新しい名前", date: "2026-10-01" });
   });
 
-  it("空文字で URL・ハッシュタグを消せる", async () => {
+  it("空文字で URL を、空の配列でハッシュタグを消せる", async () => {
     const { id, cookie } = await setup();
     await request(`/api/rooms/${id}`, {
       method: "PATCH",
       cookie,
-      body: { url: "https://example.com", hashtag: "tag" },
+      body: { url: "https://example.com", hashtags: ["tag"] },
     });
     const res = await request(`/api/rooms/${id}`, {
       method: "PATCH",
       cookie,
-      body: { url: "", hashtag: null },
+      body: { url: "", hashtags: [] },
     });
     const { event } = await res.json<UpdateEventResponse>();
-    expect(event).toMatchObject({ url: null, hashtag: null });
+    expect(event).toMatchObject({ url: null, hashtags: [] });
   });
 
   it.each([
@@ -145,6 +149,8 @@ describe("PATCH /api/rooms/:id", () => {
     ["名前が空", { name: " " }],
     ["存在しない日付", { date: "2026-02-30" }],
     ["http(s) 以外の URL", { url: "javascript:alert(1)" }],
+    ["ハッシュタグが多すぎる", { hashtags: ["a", "b", "c", "d", "e", "f"] }],
+    ["ハッシュタグが null", { hashtags: null }],
     ["知らない項目", { unknown: 1 }],
     ["受付の切り替えが真偽値でない", { commentsOpen: "no" }],
   ])("入力が不正なら 400（%s）", async (_, body) => {

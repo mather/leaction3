@@ -13,7 +13,7 @@ const event = {
   name: "LT 会",
   date: "2026-10-01",
   url: null,
-  hashtag: null,
+  hashtags: [],
   commentsOpen: true,
 };
 const talks = [{ id: "talk0001", speaker: "山田", title: "" }];

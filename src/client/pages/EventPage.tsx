@@ -630,7 +630,7 @@ function ShareContent(props: { event: EventInfo }) {
           href={xPostUrl({
             url: withSource(url(), "x"),
             text: props.event.name,
-            hashtag: props.event.hashtag,
+            hashtags: props.event.hashtags,
           })}
           target="_blank"
           rel="noopener"

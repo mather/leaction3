@@ -9,7 +9,7 @@ const validInput = {
   name: "  LT 会 #1  ",
   date: "2026-10-01",
   url: "",
-  hashtag: "#ltkai",
+  hashtags: ["#ltkai", "＃collab", "LTKAI"],
   talks: [
     { speaker: "山田", title: "SolidJS 入門" },
     { speaker: "佐藤", title: "" },
@@ -46,7 +46,14 @@ describe("POST /api/rooms", () => {
       };
     });
     expect(stored.event).toEqual([
-      { id, name: "LT 会 #1", date: "2026-10-01", url: null, hashtag: "ltkai", comments_open: 1 },
+      {
+        id,
+        name: "LT 会 #1",
+        date: "2026-10-01",
+        url: null,
+        hashtag: "ltkai collab",
+        comments_open: 1,
+      },
     ]);
     expect(stored.talks).toEqual([
       { position: 0, speaker: "山田", title: "SolidJS 入門" },
@@ -80,7 +87,11 @@ describe("POST /api/rooms", () => {
     ["名前が空", { ...validInput, name: "   " }],
     ["存在しない日付", { ...validInput, date: "2026-02-30" }],
     ["http(s) 以外の URL", { ...validInput, url: "javascript:alert(1)" }],
-    ["空白を含むハッシュタグ", { ...validInput, hashtag: "lt kai" }],
+    ["空白を含むハッシュタグ", { ...validInput, hashtags: ["lt kai"] }],
+    ["# を途中に含むハッシュタグ", { ...validInput, hashtags: ["lt#kai"] }],
+    ["空のハッシュタグ", { ...validInput, hashtags: ["#"] }],
+    ["ハッシュタグが多すぎる", { ...validInput, hashtags: ["a", "b", "c", "d", "e", "f"] }],
+    ["ハッシュタグが文字列", { ...validInput, hashtags: "ltkai" }],
     ["発表枠がない", { ...validInput, talks: [] }],
     ["発表者もタイトルも空の枠", { ...validInput, talks: [{ speaker: "", title: " " }] }],
     ["名前が長すぎる", { ...validInput, name: "あ".repeat(101) }],
@@ -108,7 +119,7 @@ describe("EventRoom.initialize", () => {
       name: "x",
       date: "2026-10-01",
       url: null,
-      hashtag: null,
+      hashtags: [],
       talks: [{ speaker: "a", title: "b" }],
     },
     ownerTokenHash: "0".repeat(64),

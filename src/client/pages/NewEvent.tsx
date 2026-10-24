@@ -3,7 +3,12 @@ import { createSignal, For, Show } from "solid-js";
 import { createStore } from "solid-js/store";
 import * as v from "valibot";
 import type { CreateEventResponse } from "../../shared/api";
-import { createEventInputSchema, DEFAULT_LIMITS } from "../../shared/schema";
+import {
+  createEventInputSchema,
+  DEFAULT_LIMITS,
+  HASHTAGS_INPUT_MAX_LENGTH,
+  splitHashtags,
+} from "../../shared/schema";
 import button from "../components/button.module.css";
 import { Icon } from "../components/Icon";
 import { currentVisitor, markCreated, trackView } from "../lib/analytics";
@@ -32,7 +37,7 @@ export function NewEvent() {
     name: "",
     date: today(),
     url: "",
-    hashtag: "",
+    hashtags: "",
     talks: Array.from({ length: INITIAL_TALKS }, emptyTalk),
   });
   const [submitting, setSubmitting] = createSignal(false);
@@ -59,7 +64,13 @@ export function NewEvent() {
       setError("発表枠を 1 つ以上入力してください");
       return;
     }
-    const input = { name: form.name, date: form.date, url: form.url, hashtag: form.hashtag, talks };
+    const input = {
+      name: form.name,
+      date: form.date,
+      url: form.url,
+      hashtags: splitHashtags(form.hashtags),
+      talks,
+    };
     if (!v.is(schema, input)) {
       setError("入力内容を確認してください");
       return;
@@ -201,14 +212,16 @@ export function NewEvent() {
             />
           </label>
           <label class={styles.field}>
-            <span class={styles.label}>ハッシュタグ</span>
+            <span class={styles.label}>
+              ハッシュタグ（空白で区切って {DEFAULT_LIMITS.hashtagsMaxCount} 個まで）
+            </span>
             <input
               class={styles.input}
               type="text"
-              maxLength={DEFAULT_LIMITS.hashtagMaxLength + 1}
-              placeholder="#ltkai"
-              value={form.hashtag}
-              onInput={(e) => setForm("hashtag", e.currentTarget.value)}
+              maxLength={HASHTAGS_INPUT_MAX_LENGTH}
+              placeholder="#ltkai #frontend"
+              value={form.hashtags}
+              onInput={(e) => setForm("hashtags", e.currentTarget.value)}
             />
           </label>
         </details>

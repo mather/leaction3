@@ -10,7 +10,8 @@ export type EventInfo = {
   /** 開催日 YYYY-MM-DD */
   date: string;
   url: string | null;
-  hashtag: string | null;
+  /** # を除いたハッシュタグ。なければ空の配列 */
+  hashtags: string[];
   commentsOpen: boolean;
 };
 
