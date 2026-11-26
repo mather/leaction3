@@ -1,4 +1,5 @@
-import { createSignal, type JSX, onCleanup } from "solid-js";
+import type { JSX } from "@solidjs/web";
+import { createSignal, onSettled } from "solid-js";
 import button from "./button.module.css";
 import { Icon } from "./Icon";
 import styles from "./UrlField.module.css";
@@ -14,7 +15,7 @@ export function UrlField(props: {
   let input: HTMLInputElement | undefined;
   const [copied, setCopied] = createSignal(false);
   let timer: ReturnType<typeof setTimeout> | undefined;
-  onCleanup(() => clearTimeout(timer));
+  onSettled(() => () => clearTimeout(timer));
 
   async function copy() {
     try {
@@ -38,7 +39,7 @@ export function UrlField(props: {
         type="text"
         aria-label={props.label}
         value={props.url}
-        readOnly
+        readonly
         onFocus={(e) => e.currentTarget.select()}
       />
       <div class={styles.actions}>

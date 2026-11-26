@@ -1,4 +1,3 @@
-import { A } from "@solidjs/router";
 import { ContactLink, LegalPage } from "../components/LegalPage";
 
 // 文面を変えたときは制定日の下に改定日を足し、第 12 条に従って周知する
@@ -120,7 +119,7 @@ export function Terms() {
 
       <h2>第10条（プライバシー）</h2>
       <p>
-        本サービスでの情報の取り扱いは、<A href="/privacy">プライバシーポリシー</A>に定めます。
+        本サービスでの情報の取り扱いは、<a href="/privacy">プライバシーポリシー</a>に定めます。
       </p>
 
       <h2>第11条（準拠法・管轄裁判所）</h2>

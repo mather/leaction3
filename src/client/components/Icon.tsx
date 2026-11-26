@@ -1,4 +1,4 @@
-import type { JSX } from "solid-js";
+import type { JSX } from "@solidjs/web";
 import styles from "./Icon.module.css";
 
 // 線のアイコン（stroke 2px）。docs/ui.md「デザイントークン」を参照。

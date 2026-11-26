@@ -1,4 +1,3 @@
-import { A } from "@solidjs/router";
 import { For } from "solid-js";
 import { ContactLink, LegalPage } from "../components/LegalPage";
 
@@ -187,7 +186,7 @@ export function Privacy() {
         <li>
           イベント情報と投稿: 作成者がイベントを削除するまで。削除から 7
           日後に完全に消去します。運営者の判断で、一定期間が経過したイベントのデータを削除することもあります（
-          <A href="/terms">利用規約</A>第7条）。
+          <a href="/terms">利用規約</a>第7条）。
         </li>
         <li>アクセス解析の操作の記録: 3 か月</li>
         <li>

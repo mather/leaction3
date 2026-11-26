@@ -1,6 +1,4 @@
-import { A } from "@solidjs/router";
-import { createSignal, For, Show } from "solid-js";
-import { createStore } from "solid-js/store";
+import { createSignal, createStore, For, Show } from "solid-js";
 import * as v from "valibot";
 import type { CreateEventResponse } from "../../shared/api";
 import {
@@ -45,12 +43,29 @@ export function NewEvent() {
   trackView("new");
   const [created, setCreated] = createSignal<CreateEventResponse & { name: string }>();
 
+  function setField(field: "name" | "date" | "url" | "hashtags", value: string) {
+    setForm((f) => {
+      f[field] = value;
+    });
+  }
+
+  function setTalk(key: number, field: "speaker" | "title", value: string) {
+    setForm((f) => {
+      const talk = f.talks.find((t) => t.key === key);
+      if (talk) talk[field] = value;
+    });
+  }
+
   function addTalk() {
-    setForm("talks", (talks) => [...talks, emptyTalk()]);
+    setForm((f) => {
+      f.talks.push(emptyTalk());
+    });
   }
 
   function removeTalk(key: number) {
-    setForm("talks", (talks) => talks.filter((t) => t.key !== key));
+    setForm((f) => {
+      f.talks = f.talks.filter((t) => t.key !== key);
+    });
   }
 
   async function submit(e: SubmitEvent) {
@@ -106,9 +121,9 @@ export function NewEvent() {
     return (
       <form class={styles.page} onSubmit={submit}>
         <header class={styles.header}>
-          <A href="/" class={styles.logo}>
+          <a href="/" class={styles.logo}>
             LeacTion!
-          </A>
+          </a>
           <h1 class={styles.title}>イベントを作る</h1>
           <p class={styles.lead}>アカウント登録は不要です。作成後に管理用の URL が発行されます。</p>
         </header>
@@ -122,10 +137,10 @@ export function NewEvent() {
               class={styles.input}
               type="text"
               required
-              maxLength={DEFAULT_LIMITS.eventNameMaxLength}
+              maxlength={DEFAULT_LIMITS.eventNameMaxLength}
               placeholder="例: フロントエンド LT 会 #12"
               value={form.name}
-              onInput={(e) => setForm("name", e.currentTarget.value)}
+              onInput={(e) => setField("name", e.currentTarget.value)}
             />
           </label>
           <label class={styles.field}>
@@ -137,7 +152,7 @@ export function NewEvent() {
               type="date"
               required
               value={form.date}
-              onInput={(e) => setForm("date", e.currentTarget.value)}
+              onInput={(e) => setField("date", e.currentTarget.value)}
             />
           </label>
         </section>
@@ -156,18 +171,18 @@ export function NewEvent() {
                       type="text"
                       aria-label={`${i() + 1} 番目の発表者`}
                       placeholder="発表者"
-                      maxLength={DEFAULT_LIMITS.speakerMaxLength}
+                      maxlength={DEFAULT_LIMITS.speakerMaxLength}
                       value={talk.speaker}
-                      onInput={(e) => setForm("talks", i(), "speaker", e.currentTarget.value)}
+                      onInput={(e) => setTalk(talk.key, "speaker", e.currentTarget.value)}
                     />
                     <input
                       class={styles.input}
                       type="text"
                       aria-label={`${i() + 1} 番目のタイトル`}
                       placeholder="タイトル"
-                      maxLength={DEFAULT_LIMITS.talkTitleMaxLength}
+                      maxlength={DEFAULT_LIMITS.talkTitleMaxLength}
                       value={talk.title}
-                      onInput={(e) => setForm("talks", i(), "title", e.currentTarget.value)}
+                      onInput={(e) => setTalk(talk.key, "title", e.currentTarget.value)}
                     />
                   </div>
                   <button
@@ -204,11 +219,11 @@ export function NewEvent() {
             <input
               class={styles.input}
               type="url"
-              inputMode="url"
-              maxLength={DEFAULT_LIMITS.eventUrlMaxLength}
+              inputmode="url"
+              maxlength={DEFAULT_LIMITS.eventUrlMaxLength}
               placeholder="https://connpass.com/event/..."
               value={form.url}
-              onInput={(e) => setForm("url", e.currentTarget.value)}
+              onInput={(e) => setField("url", e.currentTarget.value)}
             />
           </label>
           <label class={styles.field}>
@@ -218,10 +233,10 @@ export function NewEvent() {
             <input
               class={styles.input}
               type="text"
-              maxLength={HASHTAGS_INPUT_MAX_LENGTH}
+              maxlength={HASHTAGS_INPUT_MAX_LENGTH}
               placeholder="#ltkai #frontend"
               value={form.hashtags}
-              onInput={(e) => setForm("hashtags", e.currentTarget.value)}
+              onInput={(e) => setField("hashtags", e.currentTarget.value)}
             />
           </label>
         </details>

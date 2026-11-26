@@ -1,5 +1,5 @@
 import { useBeforeLeave } from "@solidjs/router";
-import { createEffect, onCleanup } from "solid-js";
+import { createEffect, createMemo } from "solid-js";
 
 /**
  * when() が真の間だけ、ページを離れる前に確認を出す（docs/ui.md「不意の離脱を防ぐ」）。
@@ -8,15 +8,16 @@ import { createEffect, onCleanup } from "solid-js";
  * 常に登録すると毎回確認が出て煩わしいので、when() が偽の間は beforeunload を外しておく。
  */
 export function useLeaveGuard(when: () => boolean, message: string) {
-  createEffect(() => {
-    if (!when()) return;
+  const guarded = createMemo(when);
+  createEffect(guarded, (on) => {
+    if (!on) return;
     const onBeforeUnload = (e: BeforeUnloadEvent) => {
       e.preventDefault();
       // 古いブラウザは returnValue が設定されたときだけ確認を出す
       e.returnValue = "";
     };
     window.addEventListener("beforeunload", onBeforeUnload);
-    onCleanup(() => window.removeEventListener("beforeunload", onBeforeUnload));
+    return () => window.removeEventListener("beforeunload", onBeforeUnload);
   });
 
   useBeforeLeave((e) => {

@@ -1,17 +1,18 @@
-import { A, useParams } from "@solidjs/router";
+import { useParams } from "@solidjs/router";
 import {
   createEffect,
   createMemo,
-  createResource,
   createSignal,
+  createStore,
+  Errored,
   For,
+  Loading,
   Match,
-  on,
-  onCleanup,
+  onSettled,
+  reconcile,
   Show,
   Switch,
 } from "solid-js";
-import { createStore, reconcile, unwrap } from "solid-js/store";
 import * as v from "valibot";
 import type {
   AdminComment,
@@ -77,20 +78,17 @@ async function loadAdmin(id: string, token: string | null): Promise<GetAdminResp
 
 export function Manage() {
   const params = useParams<{ id: string }>();
-  trackView("manage", params.id);
+  onSettled(() => trackView("manage", params.id));
   // 入れ替えに成功するまではトークンを手元に残し、再試行に使う
   let token = takeTokenFromHash();
-  const [data, { refetch, mutate }] = createResource(
-    () => params.id,
-    async (id) => {
-      const result = await loadAdmin(id, token);
-      token = null;
-      return result;
-    },
-  );
+  // 削除・復元したら、サーバーが返した内容で書き換える
+  const [data, setData] = createSignal<GetAdminResponse>(async () => {
+    const result = await loadAdmin(params.id, token);
+    token = null;
+    return result;
+  });
 
-  const errorMessage = () => {
-    const err = data.error;
+  const errorMessage = (err: unknown) => {
     if (!(err instanceof ApiError)) return null;
     if (err.code === "invalid_token") return "この管理用 URL は正しくないか、無効になっています。";
     if (err.status === 401) {
@@ -101,15 +99,15 @@ export function Manage() {
   };
 
   return (
-    <Switch fallback={<p class={styles.status}>読み込み中…</p>}>
-      <Match when={data.state === "errored"}>
+    <Errored
+      fallback={(error, reset) => (
         <div class={styles.status}>
           <Show
-            when={errorMessage()}
+            when={errorMessage(error())}
             fallback={
               <>
                 <p>読み込めませんでした。通信状況を確認してください。</p>
-                <button type="button" class={button.secondary} onClick={() => refetch()}>
+                <button type="button" class={button.secondary} onClick={() => reset()}>
                   再読み込み
                 </button>
               </>
@@ -118,31 +116,29 @@ export function Manage() {
             {(message) => <p>{message()}</p>}
           </Show>
         </div>
-      </Match>
-      <Match when={data.state === "ready" && data()}>
-        {(d) => (
-          // 削除済みなら復元の画面を出す。削除・復元したら表示内容を差し替えて画面を切り替える
-          <Show
-            when={d().deletion}
-            fallback={
-              <ManageView
-                data={d()}
-                reload={() => getAdmin(params.id)}
-                onDeleted={(deletion) => mutate({ ...d(), deletion })}
-              />
-            }
-          >
-            {(deletion) => (
+      )}
+    >
+      <Loading fallback={<p class={styles.status}>読み込み中…</p>}>
+        {/* 削除済みなら復元の画面を出す。削除・復元したら表示内容を差し替えて画面を作り直す */}
+        <Show when={data()} keyed>
+          {(d) =>
+            d.deletion ? (
               <DeletedView
-                event={d().event}
-                deletion={deletion()}
-                onRestored={(restored) => mutate(restored)}
+                event={d.event}
+                deletion={d.deletion}
+                onRestored={(restored) => setData(restored)}
               />
-            )}
-          </Show>
-        )}
-      </Match>
-    </Switch>
+            ) : (
+              <ManageView
+                data={d}
+                reload={() => getAdmin(d.event.id)}
+                onDeleted={(deletion) => setData({ ...d, deletion })}
+              />
+            )
+          }
+        </Show>
+      </Loading>
+    </Errored>
   );
 }
 
@@ -219,9 +215,9 @@ function DeletedView(props: {
             </p>
           </Show>
         </section>
-        <A href="/" class={`${button.secondary} ${styles.topLink}`}>
+        <a href="/" class={`${button.secondary} ${styles.topLink}`}>
           トップページへ
-        </A>
+        </a>
       </main>
     </div>
   );
@@ -249,23 +245,32 @@ function ManageView(props: {
     setToast({ kind, message });
     toastTimer = setTimeout(() => setToast(undefined), TOAST_MS[kind]);
   };
-  onCleanup(() => clearTimeout(toastTimer));
+  onSettled(() => () => clearTimeout(toastTimer));
 
   // 発表枠は ID で突き合わせて差し替え、編集中の行（入力欄）を作り直さない。
   // 発表枠の一覧を差し替えるたびに版を進め、取り消しが新しい変更を消さないようにする
   let talksRevision = 0;
   const setTalks = (talks: Talk[]) => {
     talksRevision++;
-    setStore("talks", reconcile(talks, { key: "id" }));
+    setStore((s) => {
+      reconcile(talks, "id")(s.talks);
+    });
   };
+
+  const setEvent = (event: EventInfo) =>
+    setStore((s) => {
+      reconcile(event)(s.event);
+    });
 
   /** 最新の内容を読み込み直す。読み込めたら true */
   const reload = async (): Promise<boolean> => {
     try {
       const latest = await props.reload();
-      setStore("event", reconcile(latest.event));
+      setStore((s) => {
+        reconcile(latest.event)(s.event);
+        reconcile(latest.commentCounts)(s.commentCounts);
+      });
       setTalks(latest.talks);
-      setStore("commentCounts", reconcile(latest.commentCounts));
     } catch {
       // 読み込めなければ今の表示のまま
       return false;
@@ -283,14 +288,12 @@ function ManageView(props: {
       return false;
     }
   };
-  createEffect(
-    on(tab, (t) => {
-      if (t !== "comments") return;
-      void loadComments().then((ok) => {
-        if (!ok) showToast("error", "コメントを読み込めませんでした。通信状況を確認してください");
-      });
-    }),
-  );
+  createEffect(tab, (t) => {
+    if (t !== "comments") return;
+    void loadComments().then((ok) => {
+      if (!ok) showToast("error", "コメントを読み込めませんでした。通信状況を確認してください");
+    });
+  });
 
   /** コメント一覧を書き換えるモデレーション操作。失敗時の取り消しは、その後に一覧が変わっていなければ戻す */
   const moderate = (
@@ -300,9 +303,10 @@ function ManageView(props: {
   ) =>
     void save({
       optimistic: () => {
+        // 書き込んだ値はすぐには読み出せないので、書き込む値を手元で作って比べる
         const before = comments();
-        setComments((list) => list?.map(change) ?? null);
-        const after = comments();
+        const after = before?.map(change) ?? null;
+        setComments(after);
         return () => {
           if (comments() === after) setComments(before);
         };
@@ -369,13 +373,13 @@ function ManageView(props: {
   return (
     <div class={styles.page}>
       <header class={styles.header}>
-        <A
+        <a
           class={styles.iconButton}
           href={`/e/${encodeURIComponent(eventId)}`}
           aria-label="イベントページに戻る"
         >
           <Icon name="chevronLeft" />
-        </A>
+        </a>
         <h1 class={styles.eventName}>{store.event.name}</h1>
         <span class={styles.badge} data-role={props.data.role}>
           {ROLE_LABELS[props.data.role]}
@@ -390,7 +394,7 @@ function ManageView(props: {
               role="tab"
               id={`tab-${t.id}`}
               class={styles.tab}
-              aria-selected={tab() === t.id}
+              aria-selected={tab() === t.id ? "true" : "false"}
               aria-controls={`panel-${t.id}`}
               onClick={() => setTab(t.id)}
             >
@@ -421,15 +425,16 @@ function ManageView(props: {
                 const previous = current[field];
                 void save({
                   optimistic: () => {
-                    setStore("talks", (t) => t.id === talkId, field, value);
+                    setStore((s) => {
+                      const t = s.talks.find((t) => t.id === talkId);
+                      if (t) t[field] = value;
+                    });
                     // その後に同じ項目が書き換えられていなければ戻す
                     return () =>
-                      setStore(
-                        "talks",
-                        (t) => t.id === talkId && t[field] === value,
-                        field,
-                        previous,
-                      );
+                      setStore((s) => {
+                        const t = s.talks.find((t) => t.id === talkId);
+                        if (t && t[field] === value) t[field] = previous;
+                      });
                   },
                   call: () => updateTalk(eventId, talkId, { [field]: value }),
                   apply: (r) => setTalks(r.talks),
@@ -469,20 +474,23 @@ function ManageView(props: {
               onSave={(patch) =>
                 void save({
                   optimistic: () => {
-                    const before = { ...store.event };
+                    const before = { ...store.event, hashtags: [...store.event.hashtags] };
                     const changed = Object.keys(patch) as (keyof UpdateEventRequest)[];
-                    setStore("event", patch as Partial<EventInfo>);
+                    setStore((s) => {
+                      Object.assign(s.event, patch);
+                    });
                     // その後に書き換えられていない項目だけを戻す
-                    return () => {
-                      for (const key of changed) {
-                        // ハッシュタグの配列はストアのプロキシ越しだと別物になるので、元の値で比べる
-                        if (unwrap(store.event)[key] === patch[key])
-                          setStore("event", key, before[key]);
-                      }
-                    };
+                    return () =>
+                      setStore((s) => {
+                        for (const key of changed) {
+                          if (sameValue(s.event[key], patch[key])) {
+                            Object.assign(s.event, { [key]: before[key] });
+                          }
+                        }
+                      });
                   },
                   call: () => updateEvent(eventId, patch),
-                  apply: (r) => setStore("event", reconcile(r.event)),
+                  apply: (r) => setEvent(r.event),
                   success: "保存しました",
                 })
               }
@@ -502,15 +510,16 @@ function ManageView(props: {
               onToggleOpen={(open) =>
                 void save({
                   optimistic: () => {
-                    setStore("event", "commentsOpen", open);
-                    return () => {
-                      if (store.event.commentsOpen === open) {
-                        setStore("event", "commentsOpen", !open);
-                      }
-                    };
+                    setStore((s) => {
+                      s.event.commentsOpen = open;
+                    });
+                    return () =>
+                      setStore((s) => {
+                        if (s.event.commentsOpen === open) s.event.commentsOpen = !open;
+                      });
                   },
                   call: () => updateEvent(eventId, { commentsOpen: open }),
-                  apply: (r) => setStore("event", reconcile(r.event)),
+                  apply: (r) => setEvent(r.event),
                   success: open ? "コメントの受付を再開しました" : "コメントの受付を停止しました",
                 })
               }
@@ -662,7 +671,10 @@ function TalksTab(props: {
     const ok = await props.onAdd({ speaker: newTalk.speaker.trim(), title: newTalk.title.trim() });
     setAdding(false);
     if (ok) {
-      setNewTalk({ speaker: "", title: "" });
+      setNewTalk((t) => {
+        t.speaker = "";
+        t.title = "";
+      });
       setSheet(undefined);
     }
   };
@@ -721,7 +733,7 @@ function TalksTab(props: {
                   type="text"
                   aria-label={`${i() + 1} 番目の発表者`}
                   placeholder="発表者"
-                  maxLength={DEFAULT_LIMITS.speakerMaxLength}
+                  maxlength={DEFAULT_LIMITS.speakerMaxLength}
                   value={talk.speaker}
                   onChange={(e) => {
                     const input = e.currentTarget;
@@ -735,7 +747,7 @@ function TalksTab(props: {
                   type="text"
                   aria-label={`${i() + 1} 番目のタイトル`}
                   placeholder="タイトル"
-                  maxLength={DEFAULT_LIMITS.talkTitleMaxLength}
+                  maxlength={DEFAULT_LIMITS.talkTitleMaxLength}
                   value={talk.title}
                   onChange={(e) => {
                     const input = e.currentTarget;
@@ -781,18 +793,28 @@ function TalksTab(props: {
             type="text"
             aria-label="発表者"
             placeholder="発表者"
-            maxLength={DEFAULT_LIMITS.speakerMaxLength}
+            maxlength={DEFAULT_LIMITS.speakerMaxLength}
             value={newTalk.speaker}
-            onInput={(e) => setNewTalk("speaker", e.currentTarget.value)}
+            onInput={(e) => {
+              const value = e.currentTarget.value;
+              setNewTalk((t) => {
+                t.speaker = value;
+              });
+            }}
           />
           <input
             class={styles.input}
             type="text"
             aria-label="タイトル"
             placeholder="タイトル"
-            maxLength={DEFAULT_LIMITS.talkTitleMaxLength}
+            maxlength={DEFAULT_LIMITS.talkTitleMaxLength}
             value={newTalk.title}
-            onInput={(e) => setNewTalk("title", e.currentTarget.value)}
+            onInput={(e) => {
+              const value = e.currentTarget.value;
+              setNewTalk((t) => {
+                t.title = value;
+              });
+            }}
           />
           <p class={styles.sheetNote}>
             発表者かタイトルのどちらかを入力してください。末尾に追加されます。
@@ -893,7 +915,7 @@ function CommentsTab(props: {
           <input
             type="checkbox"
             role="switch"
-            aria-checked={props.commentsOpen}
+            aria-checked={props.commentsOpen ? "true" : "false"}
             class={styles.switch}
             checked={props.commentsOpen}
             onChange={(e) => props.onToggleOpen(e.currentTarget.checked)}
@@ -936,45 +958,45 @@ function CommentsTab(props: {
           fallback={<p class={styles.placeholder}>まだコメントはありません。</p>}
         >
           <ol class={styles.comments}>
-            <For each={visible()}>
+            <For each={visible()} keyed={(c) => c.id}>
               {(c) => (
-                <li class={styles.comment} data-hidden={c.hidden ? "" : undefined}>
+                <li class={styles.comment} data-hidden={c().hidden ? "" : undefined}>
                   <p class={styles.commentMeta}>
-                    <span class={styles.commentTalk}>{talkName(c.talkId)}</span>
-                    <time dateTime={new Date(c.createdAt).toISOString()}>
-                      {timeFormat.format(c.createdAt)}
+                    <span class={styles.commentTalk}>{talkName(c().talkId)}</span>
+                    <time datetime={new Date(c().createdAt).toISOString()}>
+                      {timeFormat.format(c().createdAt)}
                     </time>
                     <span class={styles.author} title="投稿者 ID の先頭 4 文字">
-                      ID {shortKey(c.authorKey)}
+                      ID {shortKey(c().authorKey)}
                     </span>
                     <span class={styles.likes} title="いいね">
                       <Icon name="heart" size={14} />
-                      {c.likes}
+                      {c().likes}
                     </span>
                   </p>
-                  <Show when={c.hidden}>
+                  <Show when={c().hidden}>
                     <p class={styles.hiddenBadge}>
-                      {c.authorHidden ? "非表示（投稿者ごと）" : "非表示"}
+                      {c().authorHidden ? "非表示（投稿者ごと）" : "非表示"}
                     </p>
                   </Show>
                   {/* プレーンテキストとして表示する（リンク化もしない） */}
-                  <p class={styles.commentBody}>{c.body}</p>
+                  <p class={styles.commentBody}>{c().body}</p>
                   <div class={styles.commentActions}>
                     <button
                       type="button"
                       class={styles.textButton}
-                      onClick={() => props.onHide(c.id, !c.hidden)}
+                      onClick={() => props.onHide(c().id, !c().hidden)}
                     >
-                      {c.hidden ? "表示に戻す" : "非表示にする"}
+                      {c().hidden ? "表示に戻す" : "非表示にする"}
                     </button>
                     <Show
-                      when={c.authorHidden}
+                      when={c().authorHidden}
                       fallback={
                         <button
                           type="button"
                           class={styles.textButton}
                           data-danger
-                          onClick={() => setAuthorTarget(c.authorKey)}
+                          onClick={() => setAuthorTarget(c().authorKey)}
                         >
                           この投稿者をすべて非表示
                         </button>
@@ -983,7 +1005,7 @@ function CommentsTab(props: {
                       <button
                         type="button"
                         class={styles.textButton}
-                        onClick={() => props.onHideAuthor(c.authorKey, false)}
+                        onClick={() => props.onHideAuthor(c().authorKey, false)}
                       >
                         この投稿者の非表示を解除
                       </button>
@@ -1025,6 +1047,14 @@ function CommentsTab(props: {
       </Sheet>
     </>
   );
+}
+
+/** 基本情報の値が同じか。ハッシュタグは配列なので中身で比べる */
+function sameValue(a: unknown, b: unknown): boolean {
+  if (Array.isArray(a) && Array.isArray(b)) {
+    return a.length === b.length && a.every((x, i) => x === b[i]);
+  }
+  return a === b;
 }
 
 /** 基本情報の入力値を、API に送る値にする。空の任意項目は null */
@@ -1086,7 +1116,7 @@ function InfoTab(props: {
           class={styles.input}
           type="text"
           required
-          maxLength={DEFAULT_LIMITS.eventNameMaxLength}
+          maxlength={DEFAULT_LIMITS.eventNameMaxLength}
           value={props.event.name}
           onChange={change("name")}
         />
@@ -1106,8 +1136,8 @@ function InfoTab(props: {
         <input
           class={styles.input}
           type="url"
-          inputMode="url"
-          maxLength={DEFAULT_LIMITS.eventUrlMaxLength}
+          inputmode="url"
+          maxlength={DEFAULT_LIMITS.eventUrlMaxLength}
           placeholder="https://connpass.com/event/..."
           value={props.event.url ?? ""}
           onChange={change("url")}
@@ -1120,7 +1150,7 @@ function InfoTab(props: {
         <input
           class={styles.input}
           type="text"
-          maxLength={HASHTAGS_INPUT_MAX_LENGTH}
+          maxlength={HASHTAGS_INPUT_MAX_LENGTH}
           placeholder="#ltkai #frontend"
           value={formatHashtags(props.event.hashtags)}
           onChange={changeHashtags}
@@ -1204,6 +1234,9 @@ function AdminsTab(props: {
     }
   };
 
+  const revokedNote = (key: AdminKey) =>
+    key.revokedAt === null ? "" : ` · ${dateTimeFormat.format(key.revokedAt)} 無効化済み`;
+
   /** 一覧での呼び名。名前の入力を必須にする前に発行した URL は名前が空 */
   const keyLabel = (key: AdminKey) => key.label || "（名前なし）";
 
@@ -1241,23 +1274,22 @@ function AdminsTab(props: {
               fallback={<p class={styles.hint}>まだ発行していません。</p>}
             >
               <ul class={styles.keys}>
-                <For each={list()}>
+                <For each={list()} keyed={(key) => key.id}>
                   {(key) => (
-                    <li class={styles.key} data-revoked={key.revokedAt !== null ? "" : undefined}>
+                    <li class={styles.key} data-revoked={key().revokedAt !== null ? "" : undefined}>
                       <span class={styles.keyInfo}>
-                        <span class={styles.keyName}>{keyLabel(key)}</span>
+                        <span class={styles.keyName}>{keyLabel(key())}</span>
                         <span class={styles.keyMeta}>
-                          {dateTimeFormat.format(key.createdAt)} 発行
-                          {key.revokedAt !== null &&
-                            ` · ${dateTimeFormat.format(key.revokedAt)} 無効化済み`}
+                          {dateTimeFormat.format(key().createdAt)} 発行
+                          {revokedNote(key())}
                         </span>
                       </span>
-                      <Show when={key.revokedAt === null}>
+                      <Show when={key().revokedAt === null}>
                         <button
                           type="button"
                           class={styles.textButton}
                           data-danger
-                          onClick={() => setRevokeTarget(key)}
+                          onClick={() => setRevokeTarget(key())}
                         >
                           無効化
                         </button>
@@ -1298,7 +1330,7 @@ function AdminsTab(props: {
               type="text"
               required
               placeholder="例: 運営 佐藤さん、配信担当"
-              maxLength={DEFAULT_LIMITS.managerKeyLabelMaxLength}
+              maxlength={DEFAULT_LIMITS.managerKeyLabelMaxLength}
               value={newLabel()}
               onInput={(e) => setNewLabel(e.currentTarget.value)}
             />

@@ -1,15 +1,13 @@
-import { A, useParams } from "@solidjs/router";
+import { useParams } from "@solidjs/router";
 import {
   createEffect,
   createMemo,
-  createResource,
   createSignal,
+  Errored,
   For,
-  Match,
-  on,
-  onCleanup,
+  Loading,
+  onSettled,
   Show,
-  Switch,
 } from "solid-js";
 import type { GetEventResponse } from "../../shared/api";
 import type { Comment, ErrorCode, EventInfo, TalkId } from "../../shared/protocol";
@@ -34,20 +32,22 @@ import { withSource } from "../lib/traffic";
 import { eventUrl } from "../lib/urls";
 import styles from "./EventPage.module.css";
 
+const isNotFound = (err: unknown) => err instanceof ApiError && err.status === 404;
+
 export function EventPage() {
   const params = useParams<{ id: string }>();
-  const [data, { refetch }] = createResource(() => params.id, getEvent);
+  const data = createMemo(() => getEvent(params.id));
 
   return (
-    <Switch fallback={<p class={styles.status}>読み込み中…</p>}>
-      <Match when={data.state === "errored"}>
+    <Errored
+      fallback={(error, reset) => (
         <div class={styles.status}>
           <Show
-            when={data.error instanceof ApiError && data.error.status === 404}
+            when={isNotFound(error())}
             fallback={
               <>
                 <p>読み込めませんでした。通信状況を確認してください。</p>
-                <button type="button" class={button.secondary} onClick={() => refetch()}>
+                <button type="button" class={button.secondary} onClick={() => reset()}>
                   再読み込み
                 </button>
               </>
@@ -56,9 +56,15 @@ export function EventPage() {
             <p>イベントが見つかりません。URL を確認してください。</p>
           </Show>
         </div>
-      </Match>
-      <Match when={data.state === "ready" && data()}>{(d) => <EventView data={d()} />}</Match>
-    </Switch>
+      )}
+    >
+      <Loading fallback={<p class={styles.status}>読み込み中…</p>}>
+        {/* 別のイベントを読み込んだら作り直す（EventView は開いたときのイベントを前提にする） */}
+        <Show when={data()} keyed>
+          {(d) => <EventView data={d} />}
+        </Show>
+      </Loading>
+    </Errored>
   );
 }
 
@@ -81,20 +87,41 @@ const ERROR_MESSAGES: Record<ErrorCode, string> = {
 const timeFormat = new Intl.DateTimeFormat("ja-JP", { hour: "2-digit", minute: "2-digit" });
 
 function EventView(props: { data: GetEventResponse }) {
+  const eventId = () => props.data.event.id;
   // 開いたときに参加者 Cookie を用意する（必要なときだけ Turnstile を 1 回通す）
-  const [session, { refetch: retrySession }] = createResource(ensureSession);
-  const eventId = props.data.event.id;
-  markJoined(eventId);
-  trackView("event", eventId);
+  const [session, setSession] = createSignal<"pending" | "ready" | "error">("pending");
+  const startSession = () => {
+    ensureSession().then(
+      () => setSession("ready"),
+      () => setSession("error"),
+    );
+  };
+  const retrySession = () => {
+    setSession("pending");
+    startSession();
+  };
+
+  // この端末に管理セッションがあるときだけ、メニューに「イベントを管理する」を出す
+  const [isAdmin, setIsAdmin] = createSignal(false);
+
+  let noticeTimer: ReturnType<typeof setTimeout> | undefined;
+  onSettled(() => {
+    startSession();
+    getAdmin(eventId()).then(
+      () => setIsAdmin(true),
+      () => {},
+    );
+    markJoined(eventId());
+    trackView("event", eventId());
+    return () => clearTimeout(noticeTimer);
+  });
 
   const [notice, setNotice] = createSignal<string>();
-  let noticeTimer: ReturnType<typeof setTimeout> | undefined;
   const showNotice = (message: string) => {
     clearTimeout(noticeTimer);
     setNotice(message);
     noticeTimer = setTimeout(() => setNotice(undefined), NOTICE_MS);
   };
-  onCleanup(() => clearTimeout(noticeTimer));
 
   const [draft, setDraft] = createSignal("");
   // 初めての人には、投稿が公開されることと規約への同意を入力欄の上で知らせる
@@ -111,8 +138,8 @@ function EventView(props: { data: GetEventResponse }) {
   );
 
   const room = createRoom(
-    props.data.event.id,
-    () => session.state === "ready",
+    eventId,
+    () => session() === "ready",
     (error: RoomError) => {
       if (error.commentId !== undefined || error.talkId !== undefined) {
         // いいね・削除・感想の失敗。コメントや発表がもう消えていれば、その知らせが届いて画面から消える
@@ -131,37 +158,32 @@ function EventView(props: { data: GetEventResponse }) {
   const talks = () => room.state().talks ?? props.data.talks;
   const loaded = () => room.state().seq !== null;
 
-  const [talkId, setTalkId] = createSignal<TalkId | undefined>(
+  const [selectedTalkId, setTalkId] = createSignal<TalkId | undefined>(() =>
     pickInitialTalk(props.data.talks, {
       tid: new URLSearchParams(location.search).get("tid"),
       lastViewed: loadLastViewedTalk(props.data.event.id),
     }),
   );
+  // 見ていた発表枠が管理者に削除されたら、1 番目の発表に移る
+  const talkId = createMemo(() => {
+    const id = selectedTalkId();
+    return talks().some((t) => t.id === id) ? id : talks()[0]?.id;
+  });
   const index = () => talks().findIndex((t) => t.id === talkId());
   const talk = () => talks()[index()];
-  // 見ていた発表枠が管理者に削除されたら、1 番目の発表に移る
-  createEffect(() => {
-    if (index() === -1) setTalkId(talks()[0]?.id);
-  });
 
   // 選んだ発表を ?tid= に反映する。ルーターの遷移にせず履歴も積まない
-  createEffect(() => {
-    const id = talkId();
-    if (!id) return;
-    const url = new URL(location.href);
-    if (url.searchParams.get("tid") !== id) {
-      url.searchParams.set("tid", id);
-      history.replaceState(history.state, "", url);
-    }
-    saveLastViewedTalk(event().id, id);
-  });
-
-  // この端末に管理セッションがあるときだけ、メニューに「イベントを管理する」を出す
-  const [isAdmin] = createResource(() =>
-    getAdmin(props.data.event.id).then(
-      () => true,
-      () => false,
-    ),
+  createEffect(
+    () => [event().id, talkId()] as const,
+    ([eid, id]) => {
+      if (!id) return;
+      const url = new URL(location.href);
+      if (url.searchParams.get("tid") !== id) {
+        url.searchParams.set("tid", id);
+        history.replaceState(history.state, "", url);
+      }
+      saveLastViewedTalk(eid, id);
+    },
   );
 
   const [sheet, setSheet] = createSignal<SheetName>();
@@ -186,11 +208,12 @@ function EventView(props: { data: GetEventResponse }) {
     closeSheet();
   };
   // 削除の確認中に、そのコメントが非表示などで消えたら確認を閉じる
-  createEffect(() => {
+  const deleteTargetGone = createMemo(() => {
     const c = deleteTarget();
-    if (sheet() === "delete" && c && !room.state().comments.some((x) => x.id === c.id)) {
-      closeSheet();
-    }
+    return sheet() === "delete" && !!c && !room.state().comments.some((x) => x.id === c.id);
+  });
+  createEffect(deleteTargetGone, (gone) => {
+    if (gone) closeSheet();
   });
 
   const move = (delta: number) => {
@@ -225,35 +248,32 @@ function EventView(props: { data: GetEventResponse }) {
     if (bottom) setUnread(0);
   };
   createEffect(
-    on([talkId, comments], ([id, current], prev) => {
+    () => [talkId(), comments(), atBottom()] as const,
+    ([id, current, bottom], prev) => {
       // 発表を切り替えたとき・最初の表示では最下部（最新）から見せる
       if (!prev || prev[0] !== id) return scrollToBottom();
       const seen = new Set(prev[1].map((c) => c.id));
       const added = current.filter((c) => !seen.has(c.id));
       if (added.length === 0) return;
-      if (atBottom() || added.some((c) => c.mine)) return scrollToBottom();
+      if (bottom || added.some((c) => c.mine)) return scrollToBottom();
       setUnread((n) => n + added.length);
-    }),
+    },
   );
   // 自分が送ったときは、どこを見ていても最下部へ
-  createEffect(
-    on(
-      () => pending().length,
-      (n, prev) => {
-        if (prev !== undefined && n > prev) scrollToBottom();
-      },
-    ),
-  );
+  const pendingCount = createMemo(() => pending().length);
+  createEffect(pendingCount, (n, prev) => {
+    if (prev !== undefined && n > prev) scrollToBottom();
+  });
 
   const length = () => commentLength(draft().trim());
   const overLimit = () => length() > DEFAULT_LIMITS.commentMaxLength;
   const canSend = () =>
-    session.state === "ready" && talk() !== undefined && length() > 0 && !overLimit();
+    session() === "ready" && talk() !== undefined && length() > 0 && !overLimit();
   const submit = () => {
     const t = talk();
     if (!t || !canSend()) return;
     room.post(t.id, draft().trim());
-    track({ name: "comment", page: "event", eventId });
+    track({ name: "comment", page: "event", eventId: eventId() });
     setDraft("");
     ackNotice();
   };
@@ -282,7 +302,7 @@ function EventView(props: { data: GetEventResponse }) {
             aria-label="共有"
             onClick={() => {
               setSheet("share");
-              track({ name: "share", page: "event", eventId, target: "qr" });
+              track({ name: "share", page: "event", eventId: eventId(), target: "qr" });
             }}
           >
             <Icon name="share" />
@@ -342,7 +362,7 @@ function EventView(props: { data: GetEventResponse }) {
               disabled={!connected()}
               onSelect={(kind) => {
                 if (room.react(t().id, kind) && kind) {
-                  track({ name: "reaction", page: "event", eventId, target: kind });
+                  track({ name: "reaction", page: "event", eventId: eventId(), target: kind });
                 }
               }}
             />
@@ -367,26 +387,27 @@ function EventView(props: { data: GetEventResponse }) {
               }
             >
               <ol class={styles.commentList}>
-                <For each={comments()}>
+                {/* 届くたびに新しいオブジェクトになるので、ID で突き合わせて行を作り直さない */}
+                <For each={comments()} keyed={(c) => c.id}>
                   {(c) => (
                     <CommentCard
-                      comment={c}
+                      comment={c()}
                       connected={connected()}
                       onOpenUrl={confirmUrl}
                       onLike={(liked) => {
-                        if (room.like(c.id, liked) && liked) {
-                          track({ name: "like", page: "event", eventId });
+                        if (room.like(c().id, liked) && liked) {
+                          track({ name: "like", page: "event", eventId: eventId() });
                         }
                       }}
-                      onDelete={() => confirmDelete(c)}
+                      onDelete={() => confirmDelete(c())}
                     />
                   )}
                 </For>
-                <For each={pending()}>
+                <For each={pending()} keyed={(p) => p.clientId}>
                   {(p) => (
                     <li class={styles.card} data-pending>
                       <div class={styles.cardMain}>
-                        <p class={styles.body}>{p.body}</p>
+                        <p class={styles.body}>{p().body}</p>
                         <p class={styles.meta}>
                           <span class={styles.mine}>あなた</span>
                           <span>送信中…</span>
@@ -410,7 +431,7 @@ function EventView(props: { data: GetEventResponse }) {
           when={event().commentsOpen}
           fallback={<p class={styles.closed}>コメントの受付は停止中です</p>}
         >
-          <Show when={session.error}>
+          <Show when={session() === "error"}>
             <div class={styles.sessionError} role="alert">
               <span>参加の確認に失敗しました。</span>
               <button type="button" class={button.secondary} onClick={() => retrySession()}>
@@ -418,7 +439,7 @@ function EventView(props: { data: GetEventResponse }) {
               </button>
             </div>
           </Show>
-          <Show when={session.state === "ready" && room.status() === "reconnecting"}>
+          <Show when={session() === "ready" && room.status() === "reconnecting"}>
             <p class={styles.connection} role="status">
               接続が切れました。再接続しています…
             </p>
@@ -483,31 +504,31 @@ function EventView(props: { data: GetEventResponse }) {
 
         <Sheet open={sheet() === "talks"} onClose={closeSheet} title="発表一覧">
           <ol class={styles.talkList}>
-            <For each={talks()}>
+            <For each={talks()} keyed={(t) => t.id}>
               {(t, i) => (
                 <li>
                   <button
                     type="button"
                     class={styles.talkItem}
-                    aria-current={t.id === talkId() ? "true" : undefined}
+                    aria-current={t().id === talkId() ? "true" : undefined}
                     onClick={() => {
-                      setTalkId(t.id);
+                      setTalkId(t().id);
                       closeSheet();
                     }}
                   >
                     <span class={styles.talkNumber}>{i() + 1}</span>
                     <span class={styles.talkItemText}>
-                      <Show when={t.speaker !== ""}>
-                        <span class={styles.talkSpeaker}>{t.speaker}</span>
+                      <Show when={t().speaker !== ""}>
+                        <span class={styles.talkSpeaker}>{t().speaker}</span>
                       </Show>
-                      <Show when={t.title !== ""}>
-                        <span class={styles.talkTitle}>{t.title}</span>
+                      <Show when={t().title !== ""}>
+                        <span class={styles.talkTitle}>{t().title}</span>
                       </Show>
                     </span>
                     <Show when={loaded()}>
                       <span class={styles.talkCount}>
                         <Icon name="comment" size={16} />
-                        {counts().get(t.id) ?? 0}
+                        {counts().get(t().id) ?? 0}
                       </span>
                     </Show>
                   </button>
@@ -529,7 +550,7 @@ function EventView(props: { data: GetEventResponse }) {
             target="_blank"
             rel="noopener"
             onClick={() =>
-              track({ name: "click", page: "event", eventId, target: "event_menu_top" })
+              track({ name: "click", page: "event", eventId: eventId(), target: "event_menu_top" })
             }
           >
             LeacTion! について・イベントを作る
@@ -544,10 +565,10 @@ function EventView(props: { data: GetEventResponse }) {
             <Icon name="external" />
           </a>
           <Show when={isAdmin()}>
-            <A class={styles.menuItem} href={`/e/${encodeURIComponent(event().id)}/manage`}>
+            <a class={styles.menuItem} href={`/e/${encodeURIComponent(event().id)}/manage`}>
               イベントを管理する
               <Icon name="chevron" />
-            </A>
+            </a>
           </Show>
         </Sheet>
 
@@ -668,7 +689,7 @@ function CommentCard(props: {
           <Show when={props.comment.mine}>
             <span class={styles.mine}>あなた</span>
           </Show>
-          <time dateTime={new Date(props.comment.createdAt).toISOString()}>
+          <time datetime={new Date(props.comment.createdAt).toISOString()}>
             {timeFormat.format(props.comment.createdAt)}
           </time>
           <Show when={props.comment.mine}>
@@ -689,7 +710,7 @@ function CommentCard(props: {
         type="button"
         class={styles.likeButton}
         aria-label={props.comment.mine ? "自分のコメントにはいいねできません" : "いいね"}
-        aria-pressed={props.comment.likedByMe}
+        aria-pressed={props.comment.likedByMe ? "true" : "false"}
         data-liked={props.comment.likedByMe ? "" : undefined}
         disabled={props.comment.mine || !props.connected}
         onClick={() => props.onLike(!props.comment.likedByMe)}
