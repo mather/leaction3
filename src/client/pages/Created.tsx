@@ -1,5 +1,5 @@
 import { useNavigate } from "@solidjs/router";
-import { createEffect, createSignal, onCleanup, Show } from "solid-js";
+import { createEffect, createSignal, onSettled, Show } from "solid-js";
 import button from "../components/button.module.css";
 import { Icon } from "../components/Icon";
 import { UrlField } from "../components/UrlField";
@@ -21,7 +21,7 @@ export function Created(props: { id: string; ownerToken: string; name: string })
   const ownerUrl = () => manageUrl(props.id, props.ownerToken);
   // 主催者が告知ページやスライドに載せる URL。経路が分かるよう ?src=host を付ける
   const participantUrl = () => withSource(eventUrl(props.id), "host");
-  trackView("created", props.id);
+  onSettled(() => trackView("created", props.id));
 
   // 保存用の文面。メーラーが関連付けられていない環境（ブラウザ版 Gmail など）では mailto: が
   // 動かないので、ファイルに書き出すか Web Share API で他のアプリへ渡す
@@ -71,11 +71,11 @@ export function Created(props: { id: string; ownerToken: string; name: string })
   };
 
   // 保存を確認するまでは、閉じる・再読み込みで URL を失わないよう警告する。
-  createEffect(() => {
-    if (saved()) return;
+  createEffect(saved, (isSaved) => {
+    if (isSaved) return;
     const warn = (e: BeforeUnloadEvent) => e.preventDefault();
     window.addEventListener("beforeunload", warn);
-    onCleanup(() => window.removeEventListener("beforeunload", warn));
+    return () => window.removeEventListener("beforeunload", warn);
   });
 
   return (
@@ -164,7 +164,7 @@ export function Created(props: { id: string; ownerToken: string; name: string })
         <button
           type="button"
           class={`${button.primary} ${button.block}`}
-          aria-disabled={!saved()}
+          aria-disabled={saved() ? "false" : "true"}
           aria-describedby={saved() ? undefined : "created-next-hint"}
           onClick={goEvent}
         >

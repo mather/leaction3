@@ -1,5 +1,4 @@
-import { A } from "@solidjs/router";
-import type { JSX } from "solid-js";
+import type { JSX } from "@solidjs/web";
 import { CONTACT_FORM_URL } from "../lib/site";
 import styles from "./LegalPage.module.css";
 
@@ -8,9 +7,9 @@ export function LegalPage(props: { title: string; enactedAt: string; children: J
   return (
     <div class={styles.page}>
       <header class={styles.header}>
-        <A href="/" class={styles.logo}>
+        <a href="/" class={styles.logo}>
           LeacTion!
-        </A>
+        </a>
         <h1 class={styles.title}>{props.title}</h1>
         <p class={styles.date}>制定日: {props.enactedAt}</p>
       </header>
@@ -20,10 +19,10 @@ export function LegalPage(props: { title: string; enactedAt: string; children: J
       <footer class={styles.footer}>
         <ul class={styles.footerLinks}>
           <li>
-            <A href="/terms">利用規約</A>
+            <a href="/terms">利用規約</a>
           </li>
           <li>
-            <A href="/privacy">プライバシーポリシー</A>
+            <a href="/privacy">プライバシーポリシー</a>
           </li>
           <li>
             <a href={CONTACT_FORM_URL} target="_blank" rel="noopener">

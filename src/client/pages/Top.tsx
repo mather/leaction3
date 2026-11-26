@@ -1,4 +1,3 @@
-import { A } from "@solidjs/router";
 import { For } from "solid-js";
 import button from "../components/button.module.css";
 import { Icon, type IconName } from "../components/Icon";
@@ -56,13 +55,13 @@ const FAQ: { q: string; a: string }[] = [
 
 function CreateButton(props: { target: "top_create_hero" | "top_create_bottom" }) {
   return (
-    <A
+    <a
       href="/new"
       class={`${button.primary} ${button.block}`}
       onClick={() => track({ name: "click", page: "top", eventId: "", target: props.target })}
     >
       イベントを作る
-    </A>
+    </a>
   );
 }
 
@@ -144,10 +143,10 @@ export function Top() {
       <footer class={styles.footer}>
         <ul class={styles.footerLinks}>
           <li>
-            <A href="/terms">利用規約</A>
+            <a href="/terms">利用規約</a>
           </li>
           <li>
-            <A href="/privacy">プライバシーポリシー</A>
+            <a href="/privacy">プライバシーポリシー</a>
           </li>
           <li>
             <a href={CONTACT_FORM_URL} target="_blank" rel="noopener">

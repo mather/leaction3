@@ -1,4 +1,4 @@
-import { type Accessor, createEffect, createSignal, onCleanup } from "solid-js";
+import { type Accessor, createEffect, createMemo, createSignal } from "solid-js";
 import {
   type CommentId,
   type ErrorCode,
@@ -37,20 +37,26 @@ function wsUrl(eventId: string, seq: number | null): string {
  * ready が true になったら（参加者 Cookie を用意できたら）接続する。
  */
 export function createRoom(
-  eventId: string,
+  eventId: Accessor<string>,
   ready: Accessor<boolean>,
   onError: (error: RoomError) => void,
 ) {
-  const [state, setState] = createSignal<RoomState>(initialRoomState);
+  const [state, setStateSignal] = createSignal<RoomState>(initialRoomState);
+  // 書き込んだ値は次の反映まで state() に出ないので、ソケットの処理は手元の最新値を使う
+  let latest = initialRoomState;
+  const setState = (next: RoomState) => {
+    latest = next;
+    setStateSignal(next);
+  };
   const [status, setStatus] = createSignal<SocketStatus>("connecting");
   /** イベントが削除され、サーバーが接続を閉じた */
   const [gone, setGone] = createSignal(false);
 
   const socket = new RoomSocket({
-    url: () => wsUrl(eventId, state().seq),
+    url: () => wsUrl(eventId(), latest.seq),
     onStatus: setStatus,
     onMessage: (message) => {
-      const current = state();
+      const current = latest;
       if (hasGap(current, message)) {
         // 取りこぼしがある。いまの seq から補完し直す
         socket.reconnect();
@@ -70,20 +76,22 @@ export function createRoom(
     // 受け付けの知らせがないまま切れた投稿を送り直す。
     // 接続直後の snapshot・差分より後に届くので、登録済みのものはサーバーが二重に登録しない
     onOpen: () => {
-      for (const p of state().pending) socket.send({ type: "comment.post", ...p });
+      for (const p of latest.pending) socket.send({ type: "comment.post", ...p });
     },
     beforeReconnect: ensureSession,
     onGone: () => setGone(true),
   });
 
-  createEffect(() => {
-    if (ready()) socket.start();
+  const isReady = createMemo(ready);
+  createEffect(isReady, (r) => {
+    if (!r) return;
+    socket.start();
+    return () => socket.stop();
   });
-  onCleanup(() => socket.stop());
 
   const post = (talkId: TalkId, body: string) => {
     const pending: PendingComment = { clientId: crypto.randomUUID(), talkId, body };
-    setState((s) => addPending(s, pending));
+    setState(addPending(latest, pending));
     // つながっていなければ、再接続したときに onOpen で送る
     socket.send({ type: "comment.post", ...pending });
   };

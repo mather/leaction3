@@ -1,4 +1,5 @@
-import { createEffect, type JSX } from "solid-js";
+import type { JSX } from "@solidjs/web";
+import { createEffect } from "solid-js";
 import { Icon } from "./Icon";
 import styles from "./Sheet.module.css";
 
@@ -14,11 +15,14 @@ export function Sheet(props: {
 }) {
   let dialog: HTMLDialogElement | undefined;
 
-  createEffect(() => {
-    if (!dialog) return;
-    if (props.open && !dialog.open) dialog.showModal();
-    if (!props.open && dialog.open) dialog.close();
-  });
+  createEffect(
+    () => props.open,
+    (open) => {
+      if (!dialog) return;
+      if (open && !dialog.open) dialog.showModal();
+      if (!open && dialog.open) dialog.close();
+    },
+  );
 
   return (
     // biome-ignore lint/a11y/useKeyWithClickEvents: キーボードでは <dialog> 標準の Esc で閉じられる

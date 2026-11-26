@@ -52,7 +52,7 @@ export function ReactionPanel(props: {
       <button
         type="button"
         class={styles.head}
-        aria-expanded={open()}
+        aria-expanded={open() ? "true" : "false"}
         aria-controls="reaction-body"
         onClick={toggle}
       >
@@ -88,7 +88,7 @@ export function ReactionPanel(props: {
                     style={{ "--c": r.color }}
                     title={r.title}
                     aria-label={`${r.title}、${percents()?.[kind] ?? 0}%`}
-                    aria-pressed={selected()}
+                    aria-pressed={selected() ? "true" : "false"}
                     disabled={props.disabled}
                     onClick={() => props.onSelect(selected() ? null : kind)}
                   >
